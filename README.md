@@ -1,1 +1,1 @@
-# beatson_nlp
+# beatson
