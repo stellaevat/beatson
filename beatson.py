@@ -8,7 +8,7 @@ from shillelagh.backends.apsw.db import connect
 
 Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
-id_col = "project_id"
+id_col = "uid"
 annot_col = "labels"
 
 @st.cache_resource
@@ -23,36 +23,37 @@ def connect_gsheet_api():
     )
     return connection
 
-@st.cache_data
-def get_annotations(sheet_url):
-    query = f'SELECT * FROM "{sheet_url}"'
+@st.cache_resource
+def get_annotations(gsheet_url):
+    query = f'SELECT * FROM "{gsheet_url}"'
     executed_query = connection.execute(query)
-    df = pd.DataFrame(executed_query.fetchall())
-    df.columns = [id_col, annot_col]
-    df.set_index(id_col, inplace=True)
-    return df
+    annot_df = pd.DataFrame(executed_query.fetchall())
+    annot_df.columns = [id_col, annot_col]
+    annot_df.set_index(id_col, inplace=True)
+    return annot_df
     
-def add_annotation(sheet_url, project_id, labels):
+def insert_annotation(gsheet_url, project_uid, labels):
     insert = f"""
-            INSERT INTO "{sheet_url}" ({id_col}, {annot_col})
-            VALUES ("{project_id}", "{labels}")
+            INSERT INTO "{gsheet_url}" ({id_col}, {annot_col})
+            VALUES ({project_uid}, "{labels}")
             """
     connection.execute(insert)
     
-def update_annotation(sheet_url, project_id, labels):
+def update_annotation(gsheet_url, project_uid, labels):
     update = f"""
-            UPDATE "{sheet_url}"
+            UPDATE "{gsheet_url}"
             SET {annot_col} = "{labels}"
-            WHERE {id_col} = "{project_id}"
+            WHERE {id_col} = {project_uid}
             """
     connection.execute(update)
     
 def clean_labels():
+    # Will need to supress warning once option available
     if st.session_state.get("labels"):
         val = st.session_state.labels
         val_clean = [label.strip() for label in val.split(",")]
         st.session_state.labels = ", ".join(val_clean)
-    
+
 def recursive_dict(element):
     data_dict = dict(element.attrib)
     children = map(recursive_dict, element)
@@ -91,46 +92,51 @@ def efetch(db=database, id="", rettype="xml", retmode="xml"):
     return tag, data_dict
 
 
-st.write("Here we go")
-search = st.text_input("Search:")
+st.header("Search")
+search = st.text_input("Search:", label_visibility="collapsed")
+search_df = None
+
 if search:
     search_terms = search.split()
-    # find synonyms?
-    # entrez spelling suggestions?
+    # find synonyms / entrez spelling suggestions?
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
         tag, data_dict = efetch(id=",".join(ids))
-        if tag:
-            print(tag, data_dict)
-        # display results
+        projects = data_dict['DocumentSummary']
+        if not isinstance(projects, list):
+            projects = [projects,]
+        uids = [project["uid"] for project in projects]
+        titles = [project["Project"]["ProjectDescr"]["Title"] for project in projects]
+        search_df = pd.DataFrame({"uid":uids, "title":titles}, columns=("uid", "title"))
+        search_df.set_index("uid", inplace=True)
+        st.write(search_df)
 
 connection = connect_gsheet_api()
-sheet_url = st.secrets["private_gsheets_url"]
-df = get_annotations(sheet_url)
+gsheet_url = st.secrets["private_gsheets_url"]
+annot_df = get_annotations(gsheet_url)
 
 st.header("Annotate")
 col1, col2 = st.columns(2)
-
+    
 with col1:
-    project_id = st.text_input("Project ID:")
-# if project_id:
-    # project_id = int(project_id)
-
-if project_id in df.index:
-    labels_old = df.at[project_id, annot_col]
-    with col2:
-        labels = st.text_input("Labels:", value=labels_old, key="labels", on_change=clean_labels)
-    if labels != labels_old:
-        update_annotation(sheet_url, project_id, labels)
-        df.at[project_id, annot_col] = labels
-else:
-    with col2:
-        labels = st.text_input("Labels:", key="labels", on_change=clean_labels)
-    if project_id and labels:
-        add_annotation(sheet_url, project_id, labels)
-        df.loc[project_id] = [labels,]
+    options = annot_df.index.tolist() if search_df is None else annot_df.index.tolist() + search_df.index.tolist()
+    project_uid = st.selectbox("Project UID:", options)
+    if project_uid:
+        project_uid = int(project_uid)
+    
+with col2:
+    if project_uid in annot_df.index:
+        labels = st.text_input("Labels:", value=annot_df.at[project_uid, annot_col], key="labels", on_change=clean_labels)
+        if labels and labels != annot_df.at[project_uid, annot_col]:
+            update_annotation(gsheet_url, project_uid, labels)
+            annot_df.at[project_uid, annot_col] = labels
+    else:
+        labels = st.text_input("Labels:", value="", key="labels", on_change=clean_labels)
+        if labels and project_uid:
+            insert_annotation(gsheet_url, project_uid, labels)
+            annot_df.loc[project_uid] = [labels,]
 
 st.button("Submit")
 
 st.header("Samples")
-st.write(df)
+st.write(annot_df)
