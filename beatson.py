@@ -10,9 +10,17 @@ Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
 id_col = "uid"
 annot_col = "labels"
+delimiter = ", "
+css = r'''
+    <style>
+        [data-testid="stForm"] {border: 0px; padding: 0px;}
+        [kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
+    </style>
+'''
+st.markdown(css, unsafe_allow_html=True)
 
 @st.cache_resource
-def connect_gsheet_api():
+def connect_gsheets_api():
     connection = connect(
         ":memory:",
         adapter_kwargs = {
@@ -46,13 +54,6 @@ def update_annotation(gsheet_url, project_uid, labels):
             WHERE {id_col} = {project_uid}
             """
     connection.execute(update)
-    
-def clean_labels():
-    # Will need to supress warning once option available
-    if st.session_state.get("labels"):
-        val = st.session_state.labels
-        val_clean = [label.strip() for label in val.split(",")]
-        st.session_state.labels = ", ".join(val_clean)
 
 def recursive_dict(element):
     data_dict = dict(element.attrib)
@@ -98,7 +99,7 @@ search_df = None
 
 if search:
     search_terms = search.split()
-    # find synonyms / entrez spelling suggestions?
+    # TODO: find synonyms / entrez spelling suggestions?
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
         tag, data_dict = efetch(id=",".join(ids))
@@ -111,32 +112,41 @@ if search:
         search_df.set_index("uid", inplace=True)
         st.write(search_df)
 
-connection = connect_gsheet_api()
+st.header("Annotate")
+connection = connect_gsheets_api()
 gsheet_url = st.secrets["private_gsheets_url"]
 annot_df = get_annotations(gsheet_url)
 
-st.header("Annotate")
 col1, col2 = st.columns(2)
     
 with col1:
-    options = annot_df.index.tolist() if search_df is None else annot_df.index.tolist() + search_df.index.tolist()
-    project_uid = st.selectbox("Project UID:", options)
+    project_options = annot_df.index.tolist() if search_df is None else annot_df.index.tolist() + search_df.index.tolist()
+    project_uid = st.selectbox("Project UID:", [""] + project_options)
     if project_uid:
         project_uid = int(project_uid)
-    
-with col2:
-    if project_uid in annot_df.index:
-        labels = st.text_input("Labels:", value=annot_df.at[project_uid, annot_col], key="labels", on_change=clean_labels)
-        if labels and labels != annot_df.at[project_uid, annot_col]:
-            update_annotation(gsheet_url, project_uid, labels)
-            annot_df.at[project_uid, annot_col] = labels
-    else:
-        labels = st.text_input("Labels:", value="", key="labels", on_change=clean_labels)
-        if labels and project_uid:
-            insert_annotation(gsheet_url, project_uid, labels)
-            annot_df.loc[project_uid] = [labels,]
 
-st.button("Submit")
+with col2:
+    label_options = set()
+    for l in annot_df[annot_col]:
+        label_options = label_options.union(set(l.split(delimiter)))
+        
+    original_labels = None
+    if project_uid in annot_df.index:
+        original_labels = annot_df.at[project_uid, annot_col].split(delimiter)
+        
+    with st.form(key="Annotate"):
+        labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")  
+        submit_button = st.form_submit_button("Submit")
+    
+if submit_button and project_uid and labels:
+    labels_str = delimiter.join(labels)
+    if project_uid not in annot_df.index:
+        insert_annotation(gsheet_url, project_uid, labels_str)
+        annot_df.loc[project_uid] = [labels_str,]
+    elif set(labels) ^ set(original_labels):
+        update_annotation(gsheet_url, project_uid, labels_str)
+        annot_df.at[project_uid, annot_col] = labels_str
+    # TODO: determine what happens if new label set is empty
 
 st.header("Samples")
 st.write(annot_df)
