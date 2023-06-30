@@ -32,7 +32,7 @@ def connect_gsheets_api():
     return connection
 
 @st.cache_resource
-def get_annotations(gsheet_url):
+def load_annotations(gsheet_url):
     query = f'SELECT * FROM "{gsheet_url}"'
     executed_query = connection.execute(query)
     annot_df = pd.DataFrame(executed_query.fetchall())
@@ -91,7 +91,23 @@ def efetch(db=database, id="", rettype="xml", retmode="xml"):
     tree = ET.parse(handle)
     tag, data_dict = recursive_dict(tree.getroot())
     return tag, data_dict
-
+    
+def update_labels():
+    new = st.session_state.get("new", "")
+    labels = st.session_state.get("labels", "")
+    project_uid = st.session_state.get("project_uid", "")
+    
+    if project_uid and (labels or new):
+        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
+        labels_str = delimiter.join(sorted(list(combined)))
+        if project_uid not in annot_df.index:
+            insert_annotation(gsheet_url, project_uid, labels_str)
+            annot_df.loc[project_uid] = [labels_str,]
+        elif combined ^ set(original_labels):
+            update_annotation(gsheet_url, project_uid, labels_str)
+            annot_df.at[project_uid, annot_col] = labels_str
+            
+    st.session_state.new = ""
 
 st.header("Search")
 search = st.text_input("Search:", label_visibility="collapsed")
@@ -115,13 +131,12 @@ if search:
 st.header("Annotate")
 connection = connect_gsheets_api()
 gsheet_url = st.secrets["private_gsheets_url"]
-annot_df = get_annotations(gsheet_url)
-
+annot_df = load_annotations(gsheet_url)
 col1, col2 = st.columns(2)
     
 with col1:
     project_options = annot_df.index.tolist() if search_df is None else annot_df.index.tolist() + search_df.index.tolist()
-    project_uid = st.selectbox("Project UID:", [""] + project_options)
+    project_uid = st.selectbox("Project UID:", [""] + project_options, key="project_uid")
     if project_uid:
         project_uid = int(project_uid)
 
@@ -129,24 +144,19 @@ with col2:
     label_options = set()
     for l in annot_df[annot_col]:
         label_options = label_options.union(set(l.split(delimiter)))
+    st.session_state.label_options = sorted(list(label_options))
         
     original_labels = None
     if project_uid in annot_df.index:
         original_labels = annot_df.at[project_uid, annot_col].split(delimiter)
         
     with st.form(key="Annotate"):
-        labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")  
-        submit_button = st.form_submit_button("Submit")
+        labels = st.multiselect("Labels:", st.session_state.label_options, default=original_labels, key="labels")
+        new = st.text_input("or add new:", placeholder="Or type new (comma-separated)", label_visibility="collapsed", key="new")
+        submit_button = st.form_submit_button("Submit", on_click=update_labels)
     
-if submit_button and project_uid and labels:
-    labels_str = delimiter.join(labels)
-    if project_uid not in annot_df.index:
-        insert_annotation(gsheet_url, project_uid, labels_str)
-        annot_df.loc[project_uid] = [labels_str,]
-    elif set(labels) ^ set(original_labels):
-        update_annotation(gsheet_url, project_uid, labels_str)
-        annot_df.at[project_uid, annot_col] = labels_str
+
     # TODO: determine what happens if new label set is empty
 
-st.header("Samples")
+st.header("Project labels")
 st.write(annot_df)
