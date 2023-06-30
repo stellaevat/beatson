@@ -8,8 +8,11 @@ from shillelagh.backends.apsw.db import connect
 
 Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
+base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
 id_col = "uid"
 annot_col = "labels"
+project_col = "title"
+url_col = "url"
 delimiter = ", "
 css = r'''
     <style>
@@ -54,6 +57,23 @@ def update_annotation(gsheet_url, project_uid, labels):
             WHERE {id_col} = {project_uid}
             """
     connection.execute(update)
+    
+def submit_labels():
+    new = st.session_state.get("new", "")
+    labels = st.session_state.get("labels", "")
+    project_uid = st.session_state.get("project_uid", "")
+    
+    if project_uid and (labels or new):
+        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
+        labels_str = delimiter.join(sorted(list(combined)))
+        if project_uid not in annot_df.index:
+            insert_annotation(gsheet_url, project_uid, labels_str)
+            annot_df.loc[project_uid] = [labels_str,]
+        elif combined ^ set(original_labels):
+            update_annotation(gsheet_url, project_uid, labels_str)
+            annot_df.at[project_uid, annot_col] = labels_str
+            
+    st.session_state.new = ""
 
 def recursive_dict(element):
     data_dict = dict(element.attrib)
@@ -92,22 +112,7 @@ def efetch(db=database, id="", rettype="xml", retmode="xml"):
     tag, data_dict = recursive_dict(tree.getroot())
     return tag, data_dict
     
-def update_labels():
-    new = st.session_state.get("new", "")
-    labels = st.session_state.get("labels", "")
-    project_uid = st.session_state.get("project_uid", "")
-    
-    if project_uid and (labels or new):
-        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
-        labels_str = delimiter.join(sorted(list(combined)))
-        if project_uid not in annot_df.index:
-            insert_annotation(gsheet_url, project_uid, labels_str)
-            annot_df.loc[project_uid] = [labels_str,]
-        elif combined ^ set(original_labels):
-            update_annotation(gsheet_url, project_uid, labels_str)
-            annot_df.at[project_uid, annot_col] = labels_str
-            
-    st.session_state.new = ""
+
 
 st.header("Search")
 search = st.text_input("Search:", label_visibility="collapsed")
@@ -124,9 +129,18 @@ if search:
             projects = [projects,]
         uids = [project["uid"] for project in projects]
         titles = [project["Project"]["ProjectDescr"]["Title"] for project in projects]
-        search_df = pd.DataFrame({"uid":uids, "title":titles}, columns=("uid", "title"))
-        search_df.set_index("uid", inplace=True)
-        st.write(search_df)
+        urls = [base_url + project["uid"] for project in projects]
+        search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
+        search_df.set_index(id_col, inplace=True)
+        st.dataframe(
+            search_df,
+            use_container_width=True,
+            column_config={
+                id_col: st.column_config.TextColumn(),
+                project_col: st.column_config.TextColumn(),
+                url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*$")
+            },
+        )
 
 st.header("Annotate")
 connection = connect_gsheets_api()
@@ -153,10 +167,15 @@ with col2:
     with st.form(key="Annotate"):
         labels = st.multiselect("Labels:", st.session_state.label_options, default=original_labels, key="labels")
         new = st.text_input("or add new:", placeholder="Or type new (comma-separated)", label_visibility="collapsed", key="new")
-        submit_button = st.form_submit_button("Submit", on_click=update_labels)
-    
-
+        submit_button = st.form_submit_button("Submit", on_click=submit_labels)
     # TODO: determine what happens if new label set is empty
 
 st.header("Project labels")
-st.write(annot_df)
+st.dataframe(
+    annot_df,
+    use_container_width=True,
+    column_config={
+        id_col: st.column_config.TextColumn(),
+        "labels": st.column_config.TextColumn()
+    },
+)
