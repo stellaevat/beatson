@@ -1,18 +1,20 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 
+st.set_page_config(page_title="BioProject Annotation")
+
 Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
 base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
-id_col = "uid"
-annot_col = "labels"
-project_col = "title"
-url_col = "url"
+max_search_results = 10
+id_col = "UID"
+annot_col = "Project labels"
+project_col = "Project title"
+url_col = "URL"
 delimiter = ", "
 css = r'''
     <style>
@@ -22,7 +24,25 @@ css = r'''
 '''
 st.markdown(css, unsafe_allow_html=True)
 
-@st.cache_resource
+@st.cache_data(show_spinner="Getting search results...")
+def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
+    if not term:
+        return None
+    handle = Entrez.esearch(db=db, term=term, retmax=retmax, idtype=idtype)
+    ids = Entrez.read(handle)["IdList"]
+    return ids
+    
+@st.cache_data(show_spinner="Getting search results...")
+def efetch(db=database, id="", rettype="xml", retmode="xml"):
+    if not id:
+        return None, None
+    handle = Entrez.efetch(db=db, id=",".join(ids), rettype=rettype, retmode=retmode)
+    tree = ET.parse(handle)
+    tag, data_dict = recursive_dict(tree.getroot())
+    return tag, data_dict
+
+
+@st.cache_resource(show_spinner="Loading project data...")
 def connect_gsheets_api():
     connection = connect(
         ":memory:",
@@ -34,14 +54,16 @@ def connect_gsheets_api():
     )
     return connection
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading project data...")
 def load_annotations(gsheet_url):
     query = f'SELECT * FROM "{gsheet_url}"'
     executed_query = connection.execute(query)
     annot_df = pd.DataFrame(executed_query.fetchall())
     annot_df.columns = [id_col, annot_col]
+    annot_df[url_col] = uids_to_urls(annot_df[id_col])
     annot_df.set_index(id_col, inplace=True)
     return annot_df
+    
     
 def insert_annotation(gsheet_url, project_uid, labels):
     insert = f"""
@@ -59,6 +81,7 @@ def update_annotation(gsheet_url, project_uid, labels):
     connection.execute(update)
     
 def submit_labels():
+    # TODO: determine what happens if new label set is empty
     new = st.session_state.get("new", "")
     labels = st.session_state.get("labels", "")
     project_uid = st.session_state.get("project_uid", "")
@@ -94,25 +117,11 @@ def recursive_dict(element):
         data_dict = data_dict['text']
     tag = element.tag
     return tag, data_dict
-
-@st.cache_data
-def esearch(db=database, term="", retmax=10, idtype="acc"):
-    if not term:
-        return None
-    handle = Entrez.esearch(db=db, term=term, retmax=retmax, idtype=idtype)
-    ids = Entrez.read(handle)["IdList"]
-    return ids
     
-@st.cache_data
-def efetch(db=database, id="", rettype="xml", retmode="xml"):
-    if not id:
-        return None, None
-    handle = Entrez.efetch(db=db, id=",".join(ids), rettype=rettype, retmode=retmode)
-    tree = ET.parse(handle)
-    tag, data_dict = recursive_dict(tree.getroot())
-    return tag, data_dict
+def uids_to_urls(uids):
+    return [base_url + str(uid) + "/" for uid in uids]
     
-
+st.title("BioProject Annotation")
 
 st.header("Search")
 search = st.text_input("Search:", label_visibility="collapsed")
@@ -129,7 +138,7 @@ if search:
             projects = [projects,]
         uids = [project["uid"] for project in projects]
         titles = [project["Project"]["ProjectDescr"]["Title"] for project in projects]
-        urls = [base_url + project["uid"] for project in projects]
+        urls = uids_to_urls(uids)
         search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
         search_df.set_index(id_col, inplace=True)
         st.dataframe(
@@ -138,7 +147,7 @@ if search:
             column_config={
                 id_col: st.column_config.TextColumn(),
                 project_col: st.column_config.TextColumn(),
-                url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*$")
+                url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
             },
         )
 
@@ -168,14 +177,15 @@ with col2:
         labels = st.multiselect("Labels:", st.session_state.label_options, default=original_labels, key="labels")
         new = st.text_input("or add new:", placeholder="Or type new (comma-separated)", label_visibility="collapsed", key="new")
         submit_button = st.form_submit_button("Submit", on_click=submit_labels)
-    # TODO: determine what happens if new label set is empty
-
-st.header("Project labels")
+        
+        
+st.header("Review")
 st.dataframe(
     annot_df,
     use_container_width=True,
     column_config={
         id_col: st.column_config.TextColumn(),
-        "labels": st.column_config.TextColumn()
+        annot_col: st.column_config.TextColumn(),
+        url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
     },
 )
