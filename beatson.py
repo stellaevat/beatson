@@ -12,8 +12,8 @@ database = "bioproject"
 base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
 max_search_results = 10
 id_col = "UID"
-annot_col = "Project labels"
-project_col = "Project title"
+annot_col = "Project_labels"
+project_col = "Project_title"
 url_col = "URL"
 delimiter = ", "
 css = r'''
@@ -60,7 +60,7 @@ def load_annotations(gsheet_url):
     executed_query = connection.execute(query)
     annot_df = pd.DataFrame(executed_query.fetchall())
     annot_df.columns = [id_col, annot_col]
-    annot_df[url_col] = uids_to_urls(annot_df[id_col])
+    annot_df[url_col] = list(map(uid_to_url, annot_df[id_col]))
     annot_df.set_index(id_col, inplace=True)
     return annot_df
     
@@ -87,11 +87,12 @@ def submit_labels():
     project_uid = st.session_state.get("project_uid", "")
     
     if project_uid and (labels or new):
+        project_uid = int(project_uid)
         combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
         labels_str = delimiter.join(sorted(list(combined)))
         if project_uid not in annot_df.index:
             insert_annotation(gsheet_url, project_uid, labels_str)
-            annot_df.loc[project_uid] = [labels_str,]
+            annot_df.loc[project_uid] = [labels_str, uid_to_url(project_uid)]
         elif combined ^ set(original_labels):
             update_annotation(gsheet_url, project_uid, labels_str)
             annot_df.at[project_uid, annot_col] = labels_str
@@ -118,8 +119,8 @@ def recursive_dict(element):
     tag = element.tag
     return tag, data_dict
     
-def uids_to_urls(uids):
-    return [base_url + str(uid) + "/" for uid in uids]
+def uid_to_url(uid):
+    return base_url + str(uid) + "/"
     
 st.title("BioProject Annotation")
 
@@ -136,9 +137,9 @@ if search:
         projects = data_dict['DocumentSummary']
         if not isinstance(projects, list):
             projects = [projects,]
-        uids = [project["uid"] for project in projects]
+        uids = [int(project["uid"]) for project in projects]
         titles = [project["Project"]["ProjectDescr"]["Title"] for project in projects]
-        urls = uids_to_urls(uids)
+        urls = list(map(uid_to_url, uids))
         search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
         search_df.set_index(id_col, inplace=True)
         st.dataframe(
@@ -158,8 +159,10 @@ annot_df = load_annotations(gsheet_url)
 col1, col2 = st.columns(2)
     
 with col1:
-    project_options = annot_df.index.tolist() if search_df is None else annot_df.index.tolist() + search_df.index.tolist()
-    project_uid = st.selectbox("Project UID:", [""] + project_options, key="project_uid")
+    project_options = set(annot_df.index.tolist())
+    if search_df is not None:
+        project_options = project_options | set(search_df.index.tolist())
+    project_uid = st.selectbox("Project UID:", [""] + sorted(list(project_options)), key="project_uid")
     if project_uid:
         project_uid = int(project_uid)
 
