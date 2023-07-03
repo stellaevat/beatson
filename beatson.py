@@ -33,10 +33,10 @@ def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
     return ids
     
 @st.cache_data(show_spinner="Getting search results...")
-def efetch(db=database, id="", rettype="xml", retmode="xml"):
+def efetch(db=database, ids="", rettype="xml", retmode="xml"):
     if not id:
-        return None, None
-    handle = Entrez.efetch(db=db, id=",".join(ids), rettype=rettype, retmode=retmode)
+        return None
+    handle = Entrez.efetch(db=db, id=ids, rettype=rettype, retmode=retmode)
     tree = ET.parse(handle)
     tag, project_dict = parse_xml(tree.getroot())
     return project_dict
@@ -59,9 +59,10 @@ def load_annotations(gsheet_url):
     query = f'SELECT * FROM "{gsheet_url}"'
     executed_query = connection.execute(query)
     annot_df = pd.DataFrame(executed_query.fetchall())
-    annot_df.columns = [id_col, annot_col]
-    annot_df[url_col] = list(map(uid_to_url, annot_df[id_col]))
-    annot_df.set_index(id_col, inplace=True)
+    if not annot_df.empty:
+        annot_df.columns = [id_col, annot_col]
+        annot_df[url_col] = list(map(uid_to_url, annot_df[id_col]))
+        annot_df.set_index(id_col, inplace=True)
     return annot_df
     
     
@@ -80,22 +81,40 @@ def update_annotation(gsheet_url, project_uid, labels):
             """
     connection.execute(update)
     
+def delete_annotation(gsheet_url, project_uid):
+    delete = f"""
+            DELETE FROM "{gsheet_url}"
+            WHERE {id_col} = {project_uid}
+            """
+    connection.execute(delete) 
+    
 def submit_labels():
-    # TODO: determine what happens if new label set is empty
     new = st.session_state.get("new", "")
     labels = st.session_state.get("labels", "")
     project_uid = st.session_state.get("project_uid", "")
     
-    if project_uid and (labels or new):
+    if project_uid:
         project_uid = int(project_uid)
-        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
-        labels_str = delimiter.join(sorted(list(combined)))
-        if project_uid not in annot_df.index:
-            insert_annotation(gsheet_url, project_uid, labels_str)
-            annot_df.loc[project_uid] = [labels_str, uid_to_url(project_uid)]
-        elif combined ^ set(original_labels):
-            update_annotation(gsheet_url, project_uid, labels_str)
-            annot_df.at[project_uid, annot_col] = labels_str
+        
+        if labels or new:
+            combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
+            labels_str = delimiter.join(sorted(list(combined)))
+            if annot_df.empty:
+                insert_annotation(gsheet_url, project_uid, labels_str)
+                annot_df[id_col] = [project_uid,]
+                annot_df[annot_col] = [labels_str,]
+                annot_df[url_col] = [uid_to_url(project_uid),]
+                annot_df.set_index(id_col, inplace=True)
+            elif project_uid not in annot_df.index:
+                insert_annotation(gsheet_url, project_uid, labels_str)
+                annot_df.loc[project_uid] = [labels_str, uid_to_url(project_uid)]
+            elif combined ^ set(original_labels):
+                update_annotation(gsheet_url, project_uid, labels_str)
+                annot_df.at[project_uid, annot_col] = labels_str
+                
+        elif project_uid in annot_df.index:
+            delete_annotation(gsheet_url, project_uid)
+            annot_df.drop(project_uid, inplace=True)
             
     st.session_state.new = ""
 
@@ -129,28 +148,36 @@ search = st.text_input("Search:", label_visibility="collapsed")
 search_df = None
 
 if search:
-    search_terms = search.split()
+    search_terms = [term.strip() for term in search.split() if term.strip()]
     # TODO: find synonyms
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
-        project_dict = efetch(id=",".join(ids))
+        project_dict = efetch(ids=",".join(ids))
         projects = project_dict['DocumentSummary']
         if not isinstance(projects, list):
             projects = [projects,]
-        uids = [int(project["uid"]) for project in projects]
-        titles = [project["Project"]["ProjectDescr"]["Title"] for project in projects]
-        urls = list(map(uid_to_url, uids))
-        search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
-        search_df.set_index(id_col, inplace=True)
-        st.dataframe(
-            search_df,
-            use_container_width=True,
-            column_config={
-                id_col: st.column_config.TextColumn(),
-                project_col: st.column_config.TextColumn(),
-                url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
-            },
-        )
+        uids, titles, urls = [], [], []
+        for project in projects:
+            if "error" not in project:
+                uids.append(int(project["uid"]))
+                titles.append(project["Project"]["ProjectDescr"]["Title"])
+                urls.append(uid_to_url(project["uid"]))
+        if uids:
+            search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
+            search_df.set_index(id_col, inplace=True)
+            st.dataframe(
+                search_df,
+                use_container_width=True,
+                column_config={
+                    id_col: st.column_config.TextColumn(),
+                    project_col: st.column_config.TextColumn(),
+                    url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
+                },
+            )
+        else:
+            st.write("No search results.")
+    else:
+        st.write("No search results.")
 
 st.header("Annotate")
 connection = connect_gsheets_api()
@@ -168,9 +195,10 @@ with col1:
 
 with col2:
     label_options = set()
-    for l in annot_df[annot_col]:
-        label_options.update(set(l.split(delimiter)))
-    label_options = sorted(list(label_options))
+    if not annot_df.empty:
+        for l in annot_df[annot_col]:
+            label_options.update(set(l.split(delimiter)))
+        label_options = sorted(list(label_options))
         
     original_labels = None
     if project_uid in annot_df.index:
@@ -179,10 +207,10 @@ with col2:
     with st.form(key="Annotate"):
         if label_options:
             labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")
-            new = st.text_input("or create new:", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
+            new = st.text_input("Or create new:", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
         else:
             labels = ""
-            new = st.text_input("Create new:", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
+            new = st.text_input("Labels:", placeholder="Create new (comma-separated)", key="new")
         submit_button = st.form_submit_button("Submit", on_click=submit_labels)
         
 
