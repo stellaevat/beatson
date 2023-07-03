@@ -38,8 +38,8 @@ def efetch(db=database, id="", rettype="xml", retmode="xml"):
         return None, None
     handle = Entrez.efetch(db=db, id=",".join(ids), rettype=rettype, retmode=retmode)
     tree = ET.parse(handle)
-    tag, data_dict = recursive_dict(tree.getroot())
-    return tag, data_dict
+    tag, project_dict = parse_xml(tree.getroot())
+    return project_dict
 
 
 @st.cache_resource(show_spinner="Loading project data...")
@@ -99,9 +99,9 @@ def submit_labels():
             
     st.session_state.new = ""
 
-def recursive_dict(element):
+def parse_xml(element):
     data_dict = dict(element.attrib)
-    children = map(recursive_dict, element)
+    children = map(parse_xml, element)
     children_nodes = defaultdict(list)
     clean_nodes = {}
     for node, data in children:
@@ -133,8 +133,8 @@ if search:
     # TODO: find synonyms / entrez spelling suggestions?
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
-        tag, data_dict = efetch(id=",".join(ids))
-        projects = data_dict['DocumentSummary']
+        project_dict = efetch(id=",".join(ids))
+        projects = project_dict['DocumentSummary']
         if not isinstance(projects, list):
             projects = [projects,]
         uids = [int(project["uid"]) for project in projects]
@@ -161,7 +161,7 @@ col1, col2 = st.columns(2)
 with col1:
     project_options = set(annot_df.index.tolist())
     if search_df is not None:
-        project_options = project_options | set(search_df.index.tolist())
+        project_options.update(set(search_df.index.tolist()))
     project_uid = st.selectbox("Project UID:", [""] + sorted(list(project_options)), key="project_uid")
     if project_uid:
         project_uid = int(project_uid)
@@ -169,15 +169,15 @@ with col1:
 with col2:
     label_options = set()
     for l in annot_df[annot_col]:
-        label_options = label_options.union(set(l.split(delimiter)))
-    st.session_state.label_options = sorted(list(label_options))
+        label_options.update(set(l.split(delimiter)))
+    label_options = sorted(list(label_options))
         
     original_labels = None
     if project_uid in annot_df.index:
         original_labels = annot_df.at[project_uid, annot_col].split(delimiter)
         
     with st.form(key="Annotate"):
-        labels = st.multiselect("Labels:", st.session_state.label_options, default=original_labels, key="labels")
+        labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")
         new = st.text_input("or add new:", placeholder="Or type new (comma-separated)", label_visibility="collapsed", key="new")
         submit_button = st.form_submit_button("Submit", on_click=submit_labels)
         
