@@ -130,7 +130,7 @@ search_df = None
 
 if search:
     search_terms = search.split()
-    # TODO: find synonyms / entrez spelling suggestions?
+    # TODO: find synonyms
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
         project_dict = efetch(id=",".join(ids))
@@ -177,18 +177,23 @@ with col2:
         original_labels = annot_df.at[project_uid, annot_col].split(delimiter)
         
     with st.form(key="Annotate"):
-        labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")
-        new = st.text_input("or add new:", placeholder="Or type new (comma-separated)", label_visibility="collapsed", key="new")
+        if label_options:
+            labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")
+            new = st.text_input("or create new:", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
+        else:
+            labels = ""
+            new = st.text_input("Create new:", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
         submit_button = st.form_submit_button("Submit", on_click=submit_labels)
         
-        
-st.header("Review")
-st.dataframe(
-    annot_df,
-    use_container_width=True,
-    column_config={
-        id_col: st.column_config.TextColumn(),
-        annot_col: st.column_config.TextColumn(),
-        url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
-    },
-)
+
+if not annot_df.empty:      
+    st.header("Review")
+    st.dataframe(
+        annot_df,
+        use_container_width=True,
+        column_config={
+            id_col: st.column_config.TextColumn(),
+            annot_col: st.column_config.TextColumn(),
+            url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
+        },
+    )
