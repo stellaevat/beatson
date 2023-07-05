@@ -21,22 +21,38 @@ annot_col = "Project_labels"
 
 
 def parse_xml(element):
-    data_dict = dict(element.attrib)
-    children = map(parse_xml, element)
-    children_nodes = defaultdict(list)
-    clean_nodes = {}
-    for node, data in children:
-        children_nodes[node].append(data)
-    for node, data_list in children_nodes.items():
-        clean_nodes[node] = data_list[0] if len(data_list) == 1 else data_list
-
-    if clean_nodes:
-        data_dict.update(clean_nodes)
-
-    if element.text is not None and not element.text.isspace():
-        data_dict['text'] = element.text
-    if len(data_dict) == 1 and 'text' in data_dict:
-        data_dict = data_dict['text']
+    is_text = (element.text and not element.text.isspace())
+    if not is_text:
+        for child in element:
+            if child.tail and not child.tail.isspace():
+                is_text = True
+                break
+    
+    data_dict = {}    
+    if is_text:
+        text = element.text if (element.text and not element.text.isspace()) else ""
+        for child in element:
+            # TODO: Does biomedicine use sub/super-scripts as part of terminology? If so may want to remove spaces
+            text += (" " + child.text  + " ") if (child.text and not child.text.isspace()) else ""
+            text += child.tail if (child.tail and not child.tail.isspace()) else ""
+        data_dict['element'] = text
+    else:
+        children = map(parse_xml, element)
+        children_nodes = defaultdict(list)
+        for node, data in children:
+            children_nodes[node].append(data)
+        for node, data_list in children_nodes.items():
+            if len(data_list) == 1 and isinstance(data_list[0], str):
+                children_nodes[node] = data_list[0]
+        if children_nodes:
+            data_dict.update(children_nodes)
+    
+    if element.attrib:
+        data_dict["attributes"] = dict(element.attrib)
+        
+    if len(data_dict) == 1 and "element" in data_dict:
+        data_dict = data_dict["element"]
+        
     tag = element.tag
     return tag, data_dict
 
@@ -44,8 +60,11 @@ def efetch(database, ids):
     if not ids:
         return None
     handle = Entrez.efetch(db=database, id=ids, rettype=rettype, retmode=retmode)
-    tree = ET.parse(handle)
-    tag, data_dict = parse_xml(tree.getroot())   
+    if True:
+        tree = ET.parse(handle)
+        tag, data_dict = parse_xml(tree.getroot())
+    else:
+        data_dict = Entrez.read(handle) 
     return data_dict 
     
 def connect_gsheets_api():
@@ -93,7 +112,6 @@ for project in projects:
         project_data["uid"].append(int(project["uid"]))
         text = data.get("Title", "") + " " + data.get("Description", "") + " "
         
-        
         pub_refs = data.get("Publication", [])
         pub_ids = ""
         if pub_refs:
@@ -104,7 +122,6 @@ for project in projects:
             publications = pub_dict["PubmedArticle"]
             if not isinstance(publications, list):
                 publications = [publications,]
-            
             
             for pub in publications:
                 if "error" not in pub and "MedlineCitation" in pub and "Article" in pub["MedlineCitation"] and "Abstract" in pub["MedlineCitation"]["Article"] and "AbstractText" in pub["MedlineCitation"]["Article"]["Abstract"]:
@@ -118,13 +135,4 @@ for project in projects:
                             text += (piece["text"] + " ")
 
         project_data["text"].append(text)
-        time.sleep(2)
-        
-print(len(project_data["text"][0]))        
-print(project_data["text"][0])
-print(len(project_data["text"][1]))  
-print(project_data["text"][1])
-                
-                            
-                            
-        
+        time.sleep(2)                        
