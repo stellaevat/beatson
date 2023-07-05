@@ -34,7 +34,7 @@ def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
     
 @st.cache_data(show_spinner="Getting search results...")
 def efetch(db=database, ids="", rettype="xml", retmode="xml"):
-    if not id:
+    if not ids:
         return None
     handle = Entrez.efetch(db=db, id=ids, rettype=rettype, retmode=retmode)
     tree = ET.parse(handle)
@@ -163,7 +163,10 @@ if search:
                 titles.append(project["Project"]["ProjectDescr"]["Title"])
                 urls.append(uid_to_url(project["uid"]))
         if uids:
-            search_df = pd.DataFrame({id_col:uids, project_col:titles, url_col:urls}, columns=(id_col, project_col, url_col))
+            search_df = pd.DataFrame(
+                {id_col:uids, project_col:titles, url_col:urls}, 
+                columns=(id_col, project_col, url_col)
+            )
             search_df.set_index(id_col, inplace=True)
             st.dataframe(
                 search_df,
@@ -214,8 +217,12 @@ with col2:
         submit_button = st.form_submit_button("Submit", on_click=submit_labels)
         
 
+def start_learning():
+    return
+
 if not annot_df.empty:      
     st.header("Review")
+    st.write(f"{annot_df.shape[0]} project{'' if annot_df.shape[0] == 1 else 's'} annotated. {len(label_options)} disctinct label{'' if len(label_options) == 1 else 's'} used.")
     st.dataframe(
         annot_df,
         use_container_width=True,
@@ -225,3 +232,8 @@ if not annot_df.empty:
             url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
         },
     )
+    
+    st.header("Learn")
+    st.write("This does nothing.")
+    learn_button = st.button("Start", on_click=start_learning)
+    
