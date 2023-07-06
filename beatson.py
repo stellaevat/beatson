@@ -11,6 +11,7 @@ Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
 base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
 max_search_results = 10
+gsheet_url_annot = st.secrets["private_gsheets_url_annot"]
 id_col = "UID"
 annot_col = "Project_labels"
 project_col = "Project_title"
@@ -55,8 +56,8 @@ def connect_gsheets_api():
     return connection
 
 @st.cache_resource(show_spinner="Loading project data...")
-def load_annotations(gsheet_url):
-    query = f'SELECT * FROM "{gsheet_url}"'
+def load_annotations(gsheet_url_annot):
+    query = f'SELECT * FROM "{gsheet_url_annot}"'
     executed_query = connection.execute(query)
     annot_df = pd.DataFrame(executed_query.fetchall())
     if not annot_df.empty:
@@ -66,24 +67,24 @@ def load_annotations(gsheet_url):
     return annot_df
     
     
-def insert_annotation(gsheet_url, project_uid, labels):
+def insert_annotation(gsheet_url_annot, project_uid, labels):
     insert = f"""
-            INSERT INTO "{gsheet_url}" ({id_col}, {annot_col})
+            INSERT INTO "{gsheet_url_annot}" ({id_col}, {annot_col})
             VALUES ({project_uid}, "{labels}")
             """
     connection.execute(insert)
     
-def update_annotation(gsheet_url, project_uid, labels):
+def update_annotation(gsheet_url_annot, project_uid, labels):
     update = f"""
-            UPDATE "{gsheet_url}"
+            UPDATE "{gsheet_url_annot}"
             SET {annot_col} = "{labels}"
             WHERE {id_col} = {project_uid}
             """
     connection.execute(update)
     
-def delete_annotation(gsheet_url, project_uid):
+def delete_annotation(gsheet_url_annot, project_uid):
     delete = f"""
-            DELETE FROM "{gsheet_url}"
+            DELETE FROM "{gsheet_url_annot}"
             WHERE {id_col} = {project_uid}
             """
     connection.execute(delete) 
@@ -100,20 +101,20 @@ def submit_labels():
             combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
             labels_str = delimiter.join(sorted(list(combined)))
             if annot_df.empty:
-                insert_annotation(gsheet_url, project_uid, labels_str)
+                insert_annotation(gsheet_url_annot, project_uid, labels_str)
                 annot_df[id_col] = [project_uid,]
                 annot_df[annot_col] = [labels_str,]
                 annot_df[url_col] = [uid_to_url(project_uid),]
                 annot_df.set_index(id_col, inplace=True)
             elif project_uid not in annot_df.index:
-                insert_annotation(gsheet_url, project_uid, labels_str)
+                insert_annotation(gsheet_url_annot, project_uid, labels_str)
                 annot_df.loc[project_uid] = [labels_str, uid_to_url(project_uid)]
             elif combined ^ set(original_labels):
-                update_annotation(gsheet_url, project_uid, labels_str)
+                update_annotation(gsheet_url_annot, project_uid, labels_str)
                 annot_df.at[project_uid, annot_col] = labels_str
                 
         elif project_uid in annot_df.index:
-            delete_annotation(gsheet_url, project_uid)
+            delete_annotation(gsheet_url_annot, project_uid)
             annot_df.drop(project_uid, inplace=True)
             
     st.session_state.new = ""
@@ -184,8 +185,8 @@ if search:
 
 st.header("Annotate")
 connection = connect_gsheets_api()
-gsheet_url = st.secrets["private_gsheets_url"]
-annot_df = load_annotations(gsheet_url)
+
+annot_df = load_annotations(gsheet_url_annot)
 col1, col2 = st.columns(2)
     
 with col1:

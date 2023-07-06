@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import xml.etree.ElementTree as ET
 import time
 from Bio import Entrez
@@ -14,10 +13,8 @@ retmax = 10
 idtype="acc"
 rettype="xml"
 retmode="xml"
-gsheet_url = st.secrets["private_gsheets_url"]
-id_col = "UID"
-vector_col = "Project_vector"
-annot_col = "Project_labels"
+gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
+gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 delimiter = ", "
 
 @st.cache_resource
@@ -32,26 +29,20 @@ def connect_gsheets_api():
     )
     return connection
 
-# For beatson script
-def load_annotations(gsheet_url):
-    select = f"""
-            SELECT * EXCEPT ({vector_col})
-            FROM "{gsheet_url}"
-            """
-    executed_query = connection.execute(select)
-    annot_df = pd.DataFrame(executed_query.fetchall())
-    if not annot_df.empty:
-        annot_df.columns = [id_col, annot_col]
-        annot_df.set_index(id_col, inplace=True)
-    return annot_df
+def store_data(gsheet_url, entries):
+    columns = list(entries[0].keys())
+    values = []
+    for entry in entries:
+        entry_vals = [entry[col] for col in columns]
+        entry_str = '("' + '", "'.join([str(val) for val in entry_vals]) + '")'
+        values.append(entry_str)
+    values = ",\n".join(values)
     
-def insert_annotation(gsheet_url, project_uid, sparse, labels):
     insert = f"""
-            INSERT INTO "{gsheet_url}" ({id_col}, {vector_col}, {annot_col})
-            VALUES ({project_uid}, "{sparse}", "{labels}")
+            INSERT INTO "{gsheet_url}" ({', '.join(columns)})
+            VALUES {values}
             """
     connection.execute(insert)
-    
     
 def parse_xml(element):
     is_text = (element.text and not element.text.isspace())
@@ -120,7 +111,7 @@ def get_project_data(project):
     project_data["scope"] = target.get("attrs", {}).get("sample_scope", "")
     project_data["organism"] = target.get("Organism", [{}])[0].get("OrganismName", "") 
     
-    project_data["publications"] = ",".join([pub.get("attrs", {})["id"] for pub in publications if "id" in pub.get("attrs", {})])
+    project_data["publications"] = delimiter.join([pub["attrs"]["id"] for pub in publications if "id" in pub.get("attrs", {})])
     return project_data
 
 @st.cache_data    
@@ -176,6 +167,7 @@ def retrieve_projects(ids):
                     
                     pub_ids = project_data["publications"]
                     if pub_ids:
+                        pub_ids = ",".join(pub_ids.split(delimiter))
                         pub_dict = efetch(pub_db, pub_ids)
                         api_calls += 1
                         
@@ -188,10 +180,20 @@ def retrieve_projects(ids):
                     # Not to exceed API limit
                     if api_calls % api_calls_ps == 0:
                         time.sleep(1)
-                        
+            
             return all_project_data, all_pub_data
         else:
             print("Error retrieving projects.")
+            return None, None
     else:
         print("No project ids given.")
-    
+        return None, None
+        
+
+connection = connect_gsheets_api()
+ids = ""
+all_project_data, all_pub_data = retrieve_projects(ids)
+if all_project_data:
+    store_data(gsheet_url_proj, all_project_data)
+if all_pub_data:
+    store_data(gsheet_url_pub, all_pub_data)
