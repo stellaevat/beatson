@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 st.set_page_config(page_title="BioProject Annotation")
 
@@ -20,6 +21,8 @@ gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 gsheet_url_annot = st.secrets["private_gsheets_url_annot"]
 project_columns = ["uid", "acc", "title", "name", "description", "datatype", "scope", "organism", "publications", "labels"]
 pub_columns = ["pmid", "title", "abstract", "mesh", "keywords"]
+display_columns = ["acc", "title", "labels"]
+results_per_page = 10
 id_col = "UID"
 annot_col = "Project_labels"
 project_col = "Project_title"
@@ -199,36 +202,94 @@ def local_search(search_terms, project_df, pub_df):
 st.title("BioProject Annotation")
 
 st.header("Search")
-search = st.text_input("Search:", label_visibility="collapsed")
+search = st.text_input("Search:", label_visibility="collapsed").strip()
 connection = connect_gsheets_api()
 project_df = load_data(gsheet_url_proj, project_columns)
 pub_df = load_data(gsheet_url_pub, pub_columns)
 
-if search:
-    search_df = local_search(search, project_df, pub_df)
-    if search_df is not None and not search_df.empty:
-        st.write(f"Search results for '{search}':")
-        st.dataframe(
-            search_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={col : st.column_config.TextColumn() for col in project_columns},
-        )
+
+
+selected_row_index = int(st.session_state.get("selected_row_index", 0))
+starting_page = selected_row_index // results_per_page
+options_dict = {
+    "enableCellTextSelection" : True,
+    "onFirstDataRendered" : JsCode("""
+        function onFirstDataRendered(params) {
+            params.api.paginationGoToPage(""" + str(starting_page) + """);
+        }
+    """),
+}
+
+builder = GridOptionsBuilder.from_dataframe(project_df[display_columns])
+builder.configure_default_column()
+builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
+builder.configure_column("title", flex=3.5)
+builder.configure_column("labels", flex=1)
+builder.configure_selection(suppressRowDeselection=True)
+builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
+builder.configure_grid_options(**options_dict)
+builder.configure_side_bar()
+
+gridOptions = builder.build()
+
+st.write(f"All projects:")
+grid_response = AgGrid(
+    project_df[display_columns], 
+    gridOptions=gridOptions,
+    width="100%",
+    update_mode=GridUpdateMode.SELECTION_CHANGED,
+    allow_unsafe_jscode=True,
+    reload_data=False
+)
+
+grid_df = grid_response['data']
+selected_row = grid_response['selected_rows']
+selected_df = pd.DataFrame(selected_row)
+previous_page = int(st.session_state.get("starting_page", 0))
+
+if not selected_df.empty or (starting_page != previous_page):
+    rerun = st.session_state.get("rerun", 0)
+    if rerun:
+        st.write(project_df.iloc[selected_row_index])
+        
+        st.session_state.starting_page = starting_page
+        st.session_state.rerun = 0
     else:
-        st.write("No search results.")
-        st.dataframe(
-            project_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={col : st.column_config.TextColumn() for col in project_columns},
-        )
-else:
-    st.dataframe(
-        project_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={col : st.column_config.TextColumn() for col in project_columns},
-    )
+        selected_mask = project_df[display_columns[0]].isin(selected_df[display_columns[0]])
+        selected_data = project_df.loc[selected_mask]
+        
+        selected_row_index = selected_data.index.tolist()[0]
+        st.session_state.selected_row_index = selected_row_index
+        st.session_state.rerun = 1
+        
+        st.experimental_rerun()
+
+# if search:
+    # search_df = local_search(search, project_df, pub_df)
+    # if search_df is not None and not search_df.empty:
+        # st.write(f"Search results for '{search}':")
+        # st.dataframe(
+            # search_df,
+            # use_container_width=True,
+            # hide_index=True,
+            # column_config={col : st.column_config.TextColumn() for col in project_columns},
+        # )
+    # else:
+        # st.write("No search results.")
+        # st.dataframe(
+            # project_df,
+            # use_container_width=True,
+            # hide_index=True,
+            # column_config={col : st.column_config.TextColumn() for col in project_columns},
+        # )
+# else:
+    # st.write(f"All projects:")
+    # st.dataframe(
+        # project_df,
+        # use_container_width=True,
+        # hide_index=True,
+        # column_config={col : st.column_config.TextColumn() for col in project_columns},
+    # )
 
 st.header("Annotate")
 
