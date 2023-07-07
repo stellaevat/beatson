@@ -196,8 +196,39 @@ def local_search(search_terms, project_df, pub_df):
     mask = np.where(total_counts > 0, True, False)
     search_df = project_df.loc[mask]
     
-    search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, inplace=True, ignore_index=True)
+    search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
     return search_df
+    
+@st.cache_data(show_spinner=False)
+def build_interactive_grid(active_df, starting_page, selected_row_index):
+    options_dict = {
+        "enableCellTextSelection" : True,
+        "onFirstDataRendered" : JsCode("""
+            function onFirstDataRendered(params) {
+                params.api.paginationGoToPage(""" + str(starting_page) + """);
+            }
+        """),
+        "getRowStyle" : JsCode("""
+            function(params) {
+                if (params.rowIndex == """ + str(selected_row_index) + """) {
+                    return {'background-color': '#FF646A', 'color': 'black'};
+                }
+            }
+        """),
+    }
+
+    builder = GridOptionsBuilder.from_dataframe(active_df[display_columns])
+    builder.configure_default_column()
+    builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
+    builder.configure_column("title", flex=3.5)
+    builder.configure_column("labels", flex=1)
+    builder.configure_selection()
+    builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
+    builder.configure_grid_options(**options_dict)
+    builder.configure_side_bar()
+
+    gridOptions = builder.build()
+    return gridOptions
 
     
 st.title("BioProject Annotation")
@@ -234,44 +265,16 @@ rerun = st.session_state.get("rerun", 0)
 selected_row_index = st.session_state.get("selected_row_index", 0)
 starting_page = selected_row_index // results_per_page
 
-options_dict = {
-    "enableCellTextSelection" : True,
-    "onFirstDataRendered" : JsCode("""
-        function onFirstDataRendered(params) {
-            params.api.paginationGoToPage(""" + str(starting_page) + """);
-        }
-    """),
-    "getRowStyle" : JsCode("""
-        function(params) {
-            if (params.rowIndex == """ + str(selected_row_index) + """) {
-                return {'background-color': '#FF646A', 'color': 'black'};
-            }
-        }
-    """),
-}
-
-builder = GridOptionsBuilder.from_dataframe(active_df[display_columns])
-builder.configure_default_column()
-builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
-builder.configure_column("title", flex=3.5)
-builder.configure_column("labels", flex=1)
-builder.configure_selection()
-builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
-builder.configure_grid_options(**options_dict)
-builder.configure_side_bar()
-
-gridOptions = builder.build()
-grid_response = AgGrid(
-    active_df[display_columns], 
-    gridOptions=gridOptions,
-    width="100%",
-    update_mode=GridUpdateMode.SELECTION_CHANGED,
-    allow_unsafe_jscode=True,
-    reload_data=False
-)
-
-grid_df = grid_response['data']
-selected_row = grid_response['selected_rows']
+gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
+grid = AgGrid(
+        active_df[display_columns], 
+        gridOptions=gridOptions,
+        width="100%",
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        allow_unsafe_jscode=True,
+        reload_data=False
+    )
+selected_row = grid['selected_rows']
 selected_df = pd.DataFrame(selected_row)
 previous_page = int(st.session_state.get("starting_page", 0))
 
