@@ -8,7 +8,6 @@ from shillelagh.backends.apsw.db import connect
 
 Entrez.email = "stell.aeva@hotmail.com"
 api_calls_ps_entrez = 3
-# TODO: Meant to be 300, investigate why only ~60 allowed in practice
 api_calls_pm_google = 60
 project_db = "bioproject"
 pub_db = "pubmed"
@@ -48,7 +47,7 @@ def store_data(gsheet_url, entries):
                 VALUES {values_str}
                 '''
         connection.execute(insert)
-        print(f"{min(batch + api_calls_pm_google, len(values))}/{len(values)} entries stored.")
+        print(f"{min(batch + api_calls_pm_google, len(values))}/{len(values)} entries stored...")
         # Not to exceed API limit
         time.sleep(60)
         
@@ -108,8 +107,10 @@ def clean_text(data_dict):
                 data = data.replace(f"<{tag.upper()}>", " ")
                 data = data.replace(f"</{tag}>", " ")
                 data = data.replace(f"</{tag.upper()}>", " ")
-            
-        data_dict[col] = data.replace('"', '').strip()
+        
+        # TODO: If quotes useful, replace with single quote instead
+        # For API call syntax purposes
+        data_dict[col] = data.replace('"', "").strip()
     return data_dict
     
 @st.cache_data    
@@ -133,6 +134,7 @@ def get_project_data(project):
     project_data["scope"] = target.get("attrs", {}).get("sample_scope", "")
     project_data["organism"] = target.get("Organism", [{}])[0].get("OrganismName", "") 
     
+    pub_list = []
     for pub in publications:
         if "id" in pub.get("attrs", {}):
             pub_id = pub["attrs"]["id"].strip()
@@ -222,8 +224,8 @@ def retrieve_projects(ids):
 
 connection = connect_gsheets_api()
 ids = ""
-# with open("random_ids.txt", encoding="utf8") as f:
-    # ids = ",".join(f.readlines())
+with open("random_ids.txt", encoding="utf8") as f:
+    ids = ",".join(f.readlines())
 all_project_data, all_pub_data = retrieve_projects(ids)
 if all_project_data:
     store_data(gsheet_url_proj, all_project_data)
