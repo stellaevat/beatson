@@ -11,6 +11,8 @@ Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
 base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
 max_search_results = 10
+search_msg = "Getting search results..."
+loading_msg = "Loading project data..."
 gsheet_url_annot = st.secrets["private_gsheets_url_annot"]
 id_col = "UID"
 annot_col = "Project_labels"
@@ -25,25 +27,8 @@ css = r'''
 '''
 st.markdown(css, unsafe_allow_html=True)
 
-@st.cache_data(show_spinner="Getting search results...")
-def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
-    if not term:
-        return None
-    handle = Entrez.esearch(db=db, term=term, retmax=retmax, idtype=idtype)
-    ids = Entrez.read(handle)["IdList"]
-    return ids
-    
-@st.cache_data(show_spinner="Getting search results...")
-def efetch(db=database, ids="", rettype="xml", retmode="xml"):
-    if not ids:
-        return None
-    handle = Entrez.efetch(db=db, id=ids, rettype=rettype, retmode=retmode)
-    tree = ET.parse(handle)
-    tag, project_dict = parse_xml(tree.getroot())
-    return project_dict
 
-
-@st.cache_resource(show_spinner="Loading project data...")
+@st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
     connection = connect(
         ":memory:",
@@ -55,7 +40,7 @@ def connect_gsheets_api():
     )
     return connection
 
-@st.cache_resource(show_spinner="Loading project data...")
+@st.cache_resource(show_spinner=loading_msg)
 def load_annotations(gsheet_url_annot):
     query = f'SELECT * FROM "{gsheet_url_annot}"'
     executed_query = connection.execute(query)
@@ -65,7 +50,6 @@ def load_annotations(gsheet_url_annot):
         annot_df[url_col] = list(map(uid_to_url, annot_df[id_col]))
         annot_df.set_index(id_col, inplace=True)
     return annot_df
-    
     
 def insert_annotation(gsheet_url_annot, project_uid, labels):
     insert = f"""
@@ -88,6 +72,9 @@ def delete_annotation(gsheet_url_annot, project_uid):
             WHERE {id_col} = {project_uid}
             """
     connection.execute(delete) 
+
+def uid_to_url(uid):
+    return base_url + str(uid) + "/"
     
 def submit_labels():
     new = st.session_state.get("new", "")
@@ -118,6 +105,23 @@ def submit_labels():
             annot_df.drop(project_uid, inplace=True)
             
     st.session_state.new = ""
+    
+@st.cache_data(show_spinner=False)
+def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
+    if not term:
+        return None
+    handle = Entrez.esearch(db=db, term=term, retmax=retmax, idtype=idtype)
+    ids = Entrez.read(handle)["IdList"]
+    return ids
+    
+@st.cache_data(show_spinner=False)
+def efetch(db=database, ids="", rettype="xml", retmode="xml"):
+    if not ids:
+        return None
+    handle = Entrez.efetch(db=db, id=ids, rettype=rettype, retmode=retmode)
+    tree = ET.parse(handle)
+    tag, project_dict = parse_xml(tree.getroot())
+    return project_dict
 
 def parse_xml(element):
     data_dict = dict(element.attrib)
@@ -139,17 +143,9 @@ def parse_xml(element):
     tag = element.tag
     return tag, data_dict
     
-def uid_to_url(uid):
-    return base_url + str(uid) + "/"
-    
-st.title("BioProject Annotation")
-
-st.header("Search")
-search = st.text_input("Search:", label_visibility="collapsed")
-search_df = None
-
-if search:
-    search_terms = [term.strip() for term in search.split() if term.strip()]
+@st.cache_data(show_spinner=search_msg)
+def search_with_api(search_terms):
+    search_terms = [term.strip() for term in search_terms.split() if term.strip()]
     # TODO: find synonyms
     ids = esearch(term="+AND+".join(search_terms))
     if ids:
@@ -169,17 +165,27 @@ if search:
                 columns=(id_col, project_col, url_col)
             )
             search_df.set_index(id_col, inplace=True)
-            st.dataframe(
-                search_df,
-                use_container_width=True,
-                column_config={
-                    id_col: st.column_config.TextColumn(),
-                    project_col: st.column_config.TextColumn(),
-                    url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
-                },
-            )
-        else:
-            st.write("No search results.")
+            return search_df
+
+    
+st.title("BioProject Annotation")
+
+st.header("Search")
+search = st.text_input("Search:", label_visibility="collapsed")
+search_df = None
+
+if search:
+    search_df = search_with_api(search)
+    if search_df is not None and not search_df.empty:
+        st.dataframe(
+            search_df,
+            use_container_width=True,
+            column_config={
+                id_col: st.column_config.TextColumn(),
+                project_col: st.column_config.TextColumn(),
+                url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
+            },
+        )
     else:
         st.write("No search results.")
 
