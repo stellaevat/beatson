@@ -8,6 +8,7 @@ from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
+
 st.set_page_config(page_title="BioProject Annotation")
 
 Entrez.email = "stell.aeva@hotmail.com"
@@ -208,14 +209,22 @@ project_df = load_data(gsheet_url_proj, project_columns)
 pub_df = load_data(gsheet_url_pub, pub_columns)
 
 
-
-selected_row_index = int(st.session_state.get("selected_row_index", 0))
+rerun = st.session_state.get("rerun", 0)
+selected_row_index = st.session_state.get("selected_row_index", 0)
 starting_page = selected_row_index // results_per_page
+
 options_dict = {
     "enableCellTextSelection" : True,
     "onFirstDataRendered" : JsCode("""
         function onFirstDataRendered(params) {
             params.api.paginationGoToPage(""" + str(starting_page) + """);
+        }
+    """),
+    "getRowStyle" : JsCode("""
+        function(params) {
+            if (params.rowIndex == """ + str(selected_row_index) + """) {
+                return {'background-color': '#FF646A', 'color': 'black'};
+            }
         }
     """),
 }
@@ -225,7 +234,7 @@ builder.configure_default_column()
 builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
 builder.configure_column("title", flex=3.5)
 builder.configure_column("labels", flex=1)
-builder.configure_selection(suppressRowDeselection=True)
+builder.configure_selection()
 builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
 builder.configure_grid_options(**options_dict)
 builder.configure_side_bar()
@@ -247,22 +256,20 @@ selected_row = grid_response['selected_rows']
 selected_df = pd.DataFrame(selected_row)
 previous_page = int(st.session_state.get("starting_page", 0))
 
-if not selected_df.empty or (starting_page != previous_page):
-    rerun = st.session_state.get("rerun", 0)
-    if rerun:
-        st.write(project_df.iloc[selected_row_index])
-        
-        st.session_state.starting_page = starting_page
-        st.session_state.rerun = 0
-    else:
-        selected_mask = project_df[display_columns[0]].isin(selected_df[display_columns[0]])
-        selected_data = project_df.loc[selected_mask]
-        
-        selected_row_index = selected_data.index.tolist()[0]
-        st.session_state.selected_row_index = selected_row_index
-        st.session_state.rerun = 1
-        
-        st.experimental_rerun()
+if rerun:
+    st.write(project_df.iloc[selected_row_index])
+    
+    st.session_state.starting_page = starting_page
+    st.session_state.rerun = 0
+elif not selected_df.empty:
+    selected_mask = project_df[display_columns[0]].isin(selected_df[display_columns[0]])
+    selected_data = project_df.loc[selected_mask]
+    
+    selected_row_index = selected_data.index.tolist()[0]
+    st.session_state.selected_row_index = selected_row_index
+    st.session_state.rerun = 1
+    
+    st.experimental_rerun()
 
 # if search:
     # search_df = local_search(search, project_df, pub_df)
