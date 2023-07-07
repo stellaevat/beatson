@@ -202,12 +202,33 @@ def local_search(search_terms, project_df, pub_df):
     
 st.title("BioProject Annotation")
 
+# SEARCH FUNCTION
+
 st.header("Search")
+
 search = st.text_input("Search:", label_visibility="collapsed").strip()
+if st.session_state.get("prev_search", "") != search:
+    st.session_state.selected_row_index = 0
+st.session_state.prev_search = search
+
 connection = connect_gsheets_api()
 project_df = load_data(gsheet_url_proj, project_columns)
 pub_df = load_data(gsheet_url_pub, pub_columns)
 
+if search:     
+    search_df = local_search(search, project_df, pub_df)
+    if search_df is not None and not search_df.empty:
+        st.write(f"Search results for '{search}':")
+        active_df = search_df
+    else:
+        st.write("No search results.")
+        active_df = project_df
+else:
+    st.write(f"All projects:")
+    active_df = project_df
+
+
+# PROJECT DATAFRAME
 
 rerun = st.session_state.get("rerun", 0)
 selected_row_index = st.session_state.get("selected_row_index", 0)
@@ -229,7 +250,7 @@ options_dict = {
     """),
 }
 
-builder = GridOptionsBuilder.from_dataframe(project_df[display_columns])
+builder = GridOptionsBuilder.from_dataframe(active_df[display_columns])
 builder.configure_default_column()
 builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
 builder.configure_column("title", flex=3.5)
@@ -240,10 +261,8 @@ builder.configure_grid_options(**options_dict)
 builder.configure_side_bar()
 
 gridOptions = builder.build()
-
-st.write(f"All projects:")
 grid_response = AgGrid(
-    project_df[display_columns], 
+    active_df[display_columns], 
     gridOptions=gridOptions,
     width="100%",
     update_mode=GridUpdateMode.SELECTION_CHANGED,
@@ -257,46 +276,19 @@ selected_df = pd.DataFrame(selected_row)
 previous_page = int(st.session_state.get("starting_page", 0))
 
 if rerun:
-    st.write(project_df.iloc[selected_row_index])
+    st.write(active_df.iloc[selected_row_index])
     
     st.session_state.starting_page = starting_page
     st.session_state.rerun = 0
 elif not selected_df.empty:
-    selected_mask = project_df[display_columns[0]].isin(selected_df[display_columns[0]])
-    selected_data = project_df.loc[selected_mask]
+    selected_mask = active_df[display_columns[0]].isin(selected_df[display_columns[0]])
+    selected_data = active_df.loc[selected_mask]
     
     selected_row_index = selected_data.index.tolist()[0]
     st.session_state.selected_row_index = selected_row_index
     st.session_state.rerun = 1
     
     st.experimental_rerun()
-
-# if search:
-    # search_df = local_search(search, project_df, pub_df)
-    # if search_df is not None and not search_df.empty:
-        # st.write(f"Search results for '{search}':")
-        # st.dataframe(
-            # search_df,
-            # use_container_width=True,
-            # hide_index=True,
-            # column_config={col : st.column_config.TextColumn() for col in project_columns},
-        # )
-    # else:
-        # st.write("No search results.")
-        # st.dataframe(
-            # project_df,
-            # use_container_width=True,
-            # hide_index=True,
-            # column_config={col : st.column_config.TextColumn() for col in project_columns},
-        # )
-# else:
-    # st.write(f"All projects:")
-    # st.dataframe(
-        # project_df,
-        # use_container_width=True,
-        # hide_index=True,
-        # column_config={col : st.column_config.TextColumn() for col in project_columns},
-    # )
 
 st.header("Annotate")
 
