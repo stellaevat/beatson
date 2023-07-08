@@ -300,7 +300,8 @@ with st.form(key="Annotate"):
     else:
         labels = ""
         new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
-    submit_button = st.form_submit_button("Submit", on_click=submit_labels, args=(project_id, gsheet_url_proj))
+        
+    submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(project_id, gsheet_url_proj))
 
 def start_learning():
     return
