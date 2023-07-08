@@ -15,19 +15,17 @@ Entrez.email = "stell.aeva@hotmail.com"
 database = "bioproject"
 base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
 max_search_results = 10
+results_per_page = 10
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
 gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
 gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
-gsheet_url_annot = st.secrets["private_gsheets_url_annot"]
 project_columns = ["uid", "acc", "title", "name", "description", "datatype", "scope", "organism", "publications", "labels"]
 pub_columns = ["pmid", "title", "abstract", "mesh", "keywords"]
-display_columns = ["acc", "title", "labels"]
-results_per_page = 10
-id_col = "UID"
-annot_col = "Project_labels"
-project_col = "Project_title"
-url_col = "URL"
+id_col = "acc"
+title_col = "title"
+annot_col = "labels"
+display_columns = [id_col, title_col, annot_col]
 delimiter = ", "
 css = r'''
     <style>
@@ -51,39 +49,6 @@ def connect_gsheets_api():
         }
     )
     return connection
-
-@st.cache_resource(show_spinner=loading_msg)
-def load_annotations(gsheet_url_annot):
-    query = f'SELECT * FROM "{gsheet_url_annot}"'
-    executed_query = connection.execute(query)
-    annot_df = pd.DataFrame(executed_query.fetchall())
-    if not annot_df.empty:
-        annot_df.columns = [id_col, annot_col]
-        annot_df[url_col] = list(map(uid_to_url, annot_df[id_col]))
-        annot_df.set_index(id_col, inplace=True)
-    return annot_df
-    
-def insert_annotation(gsheet_url_annot, project_uid, labels):
-    insert = f"""
-            INSERT INTO "{gsheet_url_annot}" ({id_col}, {annot_col})
-            VALUES ({project_uid}, "{labels}")
-            """
-    connection.execute(insert)
-    
-def update_annotation(gsheet_url_annot, project_uid, labels):
-    update = f"""
-            UPDATE "{gsheet_url_annot}"
-            SET {annot_col} = "{labels}"
-            WHERE {id_col} = {project_uid}
-            """
-    connection.execute(update)
-    
-def delete_annotation(gsheet_url_annot, project_uid):
-    delete = f"""
-            DELETE FROM "{gsheet_url_annot}"
-            WHERE {id_col} = {project_uid}
-            """
-    connection.execute(delete) 
     
 @st.cache_resource(show_spinner=loading_msg)
 def load_data(gsheet_url, _columns):
@@ -94,33 +59,28 @@ def load_data(gsheet_url, _columns):
         df.columns = _columns
     return df
     
-def submit_labels():
+def update_annotation(gsheet_url_proj, project_id, labels):
+    update = f"""
+            UPDATE "{gsheet_url_proj}"
+            SET {annot_col} = "{labels}"
+            WHERE {id_col} = "{project_id}"
+            """
+    connection.execute(update)
+    
+def submit_labels(project_id, gsheet_url_proj):
     new = st.session_state.get("new", "")
     labels = st.session_state.get("labels", "")
-    project_uid = st.session_state.get("project_uid", "")
     
-    if project_uid:
-        project_uid = int(project_uid)
+    if project_id:
+        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
+        labels_str = delimiter.join(sorted(list(combined)))
         
-        if labels or new:
-            combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
-            labels_str = delimiter.join(sorted(list(combined)))
-            if annot_df.empty:
-                insert_annotation(gsheet_url_annot, project_uid, labels_str)
-                annot_df[id_col] = [project_uid,]
-                annot_df[annot_col] = [labels_str,]
-                annot_df[url_col] = [uid_to_url(project_uid),]
-                annot_df.set_index(id_col, inplace=True)
-            elif project_uid not in annot_df.index:
-                insert_annotation(gsheet_url_annot, project_uid, labels_str)
-                annot_df.loc[project_uid] = [labels_str, uid_to_url(project_uid)]
-            elif combined ^ set(original_labels):
-                update_annotation(gsheet_url_annot, project_uid, labels_str)
-                annot_df.at[project_uid, annot_col] = labels_str
-                
-        elif project_uid in annot_df.index:
-            delete_annotation(gsheet_url_annot, project_uid)
-            annot_df.drop(project_uid, inplace=True)
+        if combined ^ set(original_labels):
+            update_annotation(gsheet_url_proj, project_id, labels_str)
+            if labels_str:
+                active_df.at[selected_row_index, annot_col] = labels_str
+            else:
+                active_df.at[selected_row_index, annot_col] = None
             
     st.session_state.new = ""
     
@@ -214,14 +174,14 @@ def build_interactive_grid(active_df, starting_page, selected_row_index):
                     return {'background-color': '#FF646A', 'color': 'black'};
                 }
             }
-        """),
+        """)
     }
-
+    
     builder = GridOptionsBuilder.from_dataframe(active_df[display_columns])
-    builder.configure_default_column()
-    builder.configure_column(display_columns[0], lockPosition="left", suppressMovable=True, width=110)
-    builder.configure_column("title", flex=3.5)
-    builder.configure_column("labels", flex=1)
+    
+    builder.configure_column(id_col, lockPosition="left", suppressMovable=True, width=110)
+    builder.configure_column(title_col, flex=3.5)
+    builder.configure_column(annot_col, flex=1)
     builder.configure_selection()
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
     builder.configure_grid_options(**options_dict)
@@ -237,7 +197,7 @@ st.title("BioProject Annotation")
 
 st.header("Search")
 
-search = st.text_input("Search:", label_visibility="collapsed").strip()
+search = st.text_input("Search:", label_visibility="collapsed", key="search").strip()
 if st.session_state.get("prev_search", "") != search:
     st.session_state.selected_row_index = 0
 st.session_state.prev_search = search
@@ -252,12 +212,11 @@ if search:
         st.write(f"Search results for '{search}':")
         active_df = search_df
     else:
-        st.write("No search results.")
+        st.write(f"No search results for '{search}'. All projects:")
         active_df = project_df
 else:
     st.write(f"All projects:")
     active_df = project_df
-
 
 # PROJECT DATAFRAME
 
@@ -265,86 +224,71 @@ rerun = st.session_state.get("rerun", 0)
 selected_row_index = st.session_state.get("selected_row_index", 0)
 starting_page = selected_row_index // results_per_page
 
-gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
-grid = AgGrid(
-        active_df[display_columns], 
-        gridOptions=gridOptions,
-        width="100%",
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-        allow_unsafe_jscode=True,
-        reload_data=False
-    )
-selected_row = grid['selected_rows']
-selected_df = pd.DataFrame(selected_row)
-previous_page = int(st.session_state.get("starting_page", 0))
+if not active_df.empty:
+    gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
+    grid = AgGrid(
+            active_df[display_columns], 
+            gridOptions=gridOptions,
+            width="100%",
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            allow_unsafe_jscode=True,
+            reload_data=False
+        )
+    selected_row = grid['selected_rows']
+    selected_df = pd.DataFrame(selected_row)
+    previous_page = int(st.session_state.get("starting_page", 0))
 
-if rerun:
-    st.write(active_df.iloc[selected_row_index])
-    
-    st.session_state.starting_page = starting_page
-    st.session_state.rerun = 0
-elif not selected_df.empty:
-    selected_mask = active_df[display_columns[0]].isin(selected_df[display_columns[0]])
-    selected_data = active_df.loc[selected_mask]
-    
-    selected_row_index = selected_data.index.tolist()[0]
-    st.session_state.selected_row_index = selected_row_index
-    st.session_state.rerun = 1
-    
-    st.experimental_rerun()
+    if rerun:
+        st.write(active_df.iloc[selected_row_index])
+        st.session_state.starting_page = starting_page
+        st.session_state.rerun = 0
+        
+    elif not selected_df.empty:
+        selected_mask = active_df[id_col].isin(selected_df[id_col])
+        selected_data = active_df.loc[selected_mask]
+        
+        selected_row_index = selected_data.index.tolist()[0]
+        st.session_state.selected_row_index = selected_row_index
+        st.session_state.rerun = 1
+        
+        st.experimental_rerun()
+
+
+# ANNOTATION FUNCTION
 
 st.header("Annotate")
-
-
-# annot_df = load_annotations(gsheet_url_annot)
-# col1, col2 = st.columns(2)
+        
+project_id = active_df.iloc[selected_row_index][id_col]
+label_options = set()
+if not project_df.empty:
+    for l in project_df[annot_col]:
+        if l is not None:
+            label_options.update(set(l.split(delimiter)))
+    label_options = sorted(list(label_options))
     
-# with col1:
-    # project_options = set(annot_df.index.tolist())
-    # if search_df is not None:
-        # project_options.update(set(search_df["id_col"].tolist()))
-    # project_uid = st.selectbox("Project UID:", [""] + sorted(list(project_options)), key="project_uid")
-    # if project_uid:
-        # project_uid = int(project_uid)
+original_labels = project_df.at[selected_row_index, annot_col]
+if original_labels is None:
+    original_labels = []
+else:
+    original_labels = original_labels.split(delimiter)
 
-# with col2:
-    # label_options = set()
-    # if not annot_df.empty:
-        # for l in annot_df[annot_col]:
-            # label_options.update(set(l.split(delimiter)))
-        # label_options = sorted(list(label_options))
-        
-    # original_labels = None
-    # if project_uid in annot_df.index:
-        # original_labels = annot_df.at[project_uid, annot_col].split(delimiter)
-        
-    # with st.form(key="Annotate"):
-        # if label_options:
-            # labels = st.multiselect("Labels:", label_options, default=original_labels, key="labels")
-            # new = st.text_input("Or create new:", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
-        # else:
-            # labels = ""
-            # new = st.text_input("Labels:", placeholder="Create new (comma-separated)", key="new")
-        # submit_button = st.form_submit_button("Submit", on_click=submit_labels)
-        
+with st.form(key="Annotate"):
+    st.write(f"Edit {project_id} labels:")
+    if label_options:
+        col1, col2 = st.columns(2)
+        with col1:
+            labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key="labels")
+        with col2:
+            new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
+    else:
+        labels = ""
+        new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
+    submit_button = st.form_submit_button("Submit", on_click=submit_labels, args=(project_id, gsheet_url_proj))
 
-# def start_learning():
-    # return
+def start_learning():
+    return
 
-# if not annot_df.empty:      
-    # st.header("Review")
-    # st.write(f"{annot_df.shape[0]} project{'' if annot_df.shape[0] == 1 else 's'} annotated. {len(label_options)} disctinct label{'' if len(label_options) == 1 else 's'} used.")
-    # st.dataframe(
-        # annot_df,
-        # use_container_width=True,
-        # column_config={
-            # id_col: st.column_config.TextColumn(),
-            # annot_col: st.column_config.TextColumn(),
-            # url_col: st.column_config.LinkColumn(width="small", validate="^"+base_url+"[0-9]*/$")
-        # },
-    # )
-    
-    # st.header("Learn")
-    # st.write("This does nothing.")
-    # learn_button = st.button("Start", on_click=start_learning)
+st.header("Learn")
+st.write("Initiate learning algorithm:")
+learn_button = st.button("Start", on_click=start_learning)
     
