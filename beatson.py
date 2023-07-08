@@ -31,6 +31,7 @@ css = r'''
     <style>
         [data-testid="stForm"] {border: 0px; padding: 0px;}
         [kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
+        [kind="secondary"] {position: absolute; right: 0px;}
     </style>
 '''
 st.markdown(css, unsafe_allow_html=True)
@@ -190,6 +191,14 @@ def build_interactive_grid(active_df, starting_page, selected_row_index):
     gridOptions = builder.build()
     return gridOptions
 
+def show_details():
+    st.session_state.project_details_hidden = False
+    return
+    
+def hide_details():
+    st.session_state.project_details_hidden = True
+    return
+
     
 st.title("BioProject Annotation")
 
@@ -237,9 +246,15 @@ if not active_df.empty:
     selected_row = grid['selected_rows']
     selected_df = pd.DataFrame(selected_row)
     previous_page = int(st.session_state.get("starting_page", 0))
+    
+    if st.session_state.get("project_details_hidden", True):
+        show_details = st.button("Show details", key="show_button", on_click=show_details)
+    else:
+        hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
 
     if rerun:
-        st.write(active_df.iloc[selected_row_index])
+        if not st.session_state.get("project_details_hidden", True):
+            st.write(active_df.iloc[selected_row_index])
         st.session_state.starting_page = starting_page
         st.session_state.rerun = 0
         
@@ -251,8 +266,10 @@ if not active_df.empty:
         st.session_state.selected_row_index = selected_row_index
         st.session_state.rerun = 1
         
-        st.experimental_rerun()
-
+        st.experimental_rerun()    
+    else:
+        if not st.session_state.get("project_details_hidden", True):
+            st.write(active_df.iloc[selected_row_index])
 
 # ANNOTATION FUNCTION
 
