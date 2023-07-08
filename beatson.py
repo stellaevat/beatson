@@ -32,12 +32,16 @@ css = r'''
         [data-testid="stForm"] {border: 0px; padding: 0px;}
         [kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
         [kind="secondary"] {position: absolute; right: 0px;}
+        thead {display : none;}
     </style>
 '''
 st.markdown(css, unsafe_allow_html=True)
 
-def uid_to_url(uid):
-    return base_url + str(uid) + "/"
+def id_to_url(project_id):
+    return base_url + str(project_id) + "/"
+    
+def id_to_html_link(project_id):
+    return f'<a target="_blank" href="{base_url + str(project_id) + "/"}">{project_id}</a>'
     
 @st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
@@ -121,7 +125,8 @@ def parse_xml(element):
         data_dict = data_dict['text']
     tag = element.tag
     return tag, data_dict
-    
+ 
+# TODO: Adapt to new parsing 
 @st.cache_data(show_spinner=search_msg)
 def api_search(search_terms):
     search_terms = [term.strip() for term in search_terms.split() if term.strip()]
@@ -135,9 +140,9 @@ def api_search(search_terms):
         uids, titles, urls = [], [], []
         for project in projects:
             if "error" not in project:
-                uids.append(int(project["uid"]))
+                uids.append(project["acc"])
                 titles.append(project["Project"]["ProjectDescr"]["Title"])
-                urls.append(uid_to_url(project["uid"]))
+                urls.append(id_to_url(project["acc"]))
         if uids:
             search_df = pd.DataFrame(
                 {id_col:uids, project_col:titles, url_col:urls}, 
@@ -198,6 +203,20 @@ def show_details():
 def hide_details():
     st.session_state.project_details_hidden = True
     return
+    
+def display_project_details(project):
+    st.write(f"Accession: {project['acc']}, ID: {project['uid']}")
+    st.subheader(f"{project['title'] if project['title'] else project['name'] if project['name'] else project['acc']}")
+    st.write(project["description"])
+    
+    project["links"] = id_to_html_link(project["acc"])
+    detail_fields = ["datatype", "scope", "organism", "links"]
+    df = pd.DataFrame(project[detail_fields])
+    st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
+    
+    st.write("")
+    st.write("")
+    st.write("")
 
     
 st.title("BioProject Annotation")
@@ -243,18 +262,20 @@ if not active_df.empty:
             allow_unsafe_jscode=True,
             reload_data=False
         )
+    st.write("")
     selected_row = grid['selected_rows']
     selected_df = pd.DataFrame(selected_row)
     previous_page = int(st.session_state.get("starting_page", 0))
+    project_details_hidden = st.session_state.get("project_details_hidden", True)
     
-    if st.session_state.get("project_details_hidden", True):
+    if project_details_hidden:
         show_details = st.button("Show details", key="show_button", on_click=show_details)
     else:
         hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
 
     if rerun:
-        if not st.session_state.get("project_details_hidden", True):
-            st.write(active_df.iloc[selected_row_index])
+        if not project_details_hidden:
+            display_project_details(active_df.iloc[selected_row_index])
         st.session_state.starting_page = starting_page
         st.session_state.rerun = 0
         
@@ -268,8 +289,8 @@ if not active_df.empty:
         
         st.experimental_rerun()    
     else:
-        if not st.session_state.get("project_details_hidden", True):
-            st.write(active_df.iloc[selected_row_index])
+        if not project_details_hidden:
+            display_project_details(active_df.iloc[selected_row_index])
 
 # ANNOTATION FUNCTION
 
