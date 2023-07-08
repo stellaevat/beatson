@@ -207,10 +207,11 @@ def hide_details():
 def display_project_details(project):
     st.write(f"Accession: {project['acc']}, ID: {project['uid']}")
     st.subheader(f"{project['title'] if project['title'] else project['name'] if project['name'] else project['acc']}")
-    st.write(project["description"])
+    if project["description"]:
+        st.write(project["description"])
     
-    project["links"] = id_to_html_link(project["acc"])
-    detail_fields = ["datatype", "scope", "organism", "links"]
+    project["link"] = id_to_html_link(project["acc"])
+    detail_fields = ["datatype", "scope", "organism", "link"]
     df = pd.DataFrame(project[detail_fields])
     st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
     
@@ -243,7 +244,7 @@ if search:
         st.write(f"No search results for '{search}'. All projects:")
         active_df = project_df
 else:
-    st.write(f"All projects:")
+    st.write(f"All projects for annotation:")
     active_df = project_df
 
 # PROJECT DATAFRAME
@@ -260,13 +261,14 @@ if not active_df.empty:
             width="100%",
             update_mode=GridUpdateMode.SELECTION_CHANGED,
             allow_unsafe_jscode=True,
-            reload_data=False
+            reload_data=False,
+            enable_enterprise_modules=False
         )
     st.write("")
     selected_row = grid['selected_rows']
     selected_df = pd.DataFrame(selected_row)
     previous_page = int(st.session_state.get("starting_page", 0))
-    project_details_hidden = st.session_state.get("project_details_hidden", True)
+    project_details_hidden = st.session_state.get("project_details_hidden", False)
     
     if project_details_hidden:
         show_details = st.button("Show details", key="show_button", on_click=show_details)
