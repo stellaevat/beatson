@@ -11,7 +11,6 @@ api_calls_ps_entrez = 3
 api_calls_pm_google = 60
 project_db = "bioproject"
 pub_db = "pubmed"
-retmax = 10
 idtype="acc"
 rettype="xml"
 retmode="xml"
@@ -20,7 +19,7 @@ gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 delimiter = ", "
 style_tags = ["b", "i", "p"]
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def connect_gsheets_api():
     connection = connect(
         ":memory:",
@@ -89,7 +88,7 @@ def parse_xml(element):
     return tag, data_dict
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False) 
 def efetch(database, ids):
     if not ids:
         return None
@@ -98,7 +97,7 @@ def efetch(database, ids):
     tag, data_dict = parse_xml(tree.getroot())
     return data_dict 
     
-@st.cache_data
+@st.cache_data(show_spinner=False) 
 def clean_text(data_dict):
     for col, data in data_dict.items():
         if "<" in data and ">" in data:
@@ -110,10 +109,18 @@ def clean_text(data_dict):
         
         # TODO: If quotes useful, replace with single quote instead
         # For API call syntax purposes
-        data_dict[col] = data.replace('"', "").strip().capitalize()
+        data = data.replace('"', "").strip()
+        if data.isnumeric():
+            data = "'" + str(data)
+        elif len(data) > 1:
+            data = data[0].upper() + data[1:]
+        else:
+            data = data.upper()
+        
+        data_dict[col] = data
     return data_dict
     
-@st.cache_data    
+@st.cache_data(show_spinner=False)   
 def get_project_data(project):
     project_data = {}
     
@@ -147,12 +154,12 @@ def get_project_data(project):
     project_data = clean_text(project_data)
     return project_data
 
-@st.cache_data    
+@st.cache_data(show_spinner=False)    
 def get_publication_data(pub):
     pub_data = {}
     article = pub.get("Article", [{}])[0]
     
-    pub_data["pmid"] = pub.get("PMID", [{}])[0].get("text", "")
+    pub_data["pmid"] = "'" + pub.get("PMID", [{}])[0].get("text", "")
     pub_data["title"] = article.get("ArticleTitle", "")
     
     clean = []
@@ -185,15 +192,15 @@ def get_publication_data(pub):
     pub_data = clean_text(pub_data)
     return pub_data
     
-@st.cache_data
+@st.cache_data(show_spinner="Getting search results...")
 def retrieve_projects(ids):
+    all_project_data, all_pub_data = [], []
+    
     if ids:
         project_dict = efetch(project_db, ids)
         api_calls = 1
         
         if (projects := project_dict.get("DocumentSummary")):
-            all_project_data, all_pub_data = [], []
-            
             for project in projects:
                 if "Project" in project:
                     project_data = get_project_data(project["Project"][0])
@@ -214,22 +221,20 @@ def retrieve_projects(ids):
                     # Not to exceed API limit
                     if api_calls % api_calls_ps_entrez == 0:
                         time.sleep(1)
-            
-            return all_project_data, all_pub_data
         else:
             print("Error retrieving projects.")
-            return None, None
     else:
         print("No project ids given.")
-        return None, None
+    
+    return all_project_data, all_pub_data
         
 
-connection = connect_gsheets_api()
-ids = ""
-with open("random_ids.txt", encoding="utf8") as f:
-    ids = ",".join(f.readlines())
-all_project_data, all_pub_data = retrieve_projects(ids)
-if all_project_data:
-    store_data(gsheet_url_proj, all_project_data)
-if all_pub_data:
-    store_data(gsheet_url_pub, all_pub_data)
+# connection = connect_gsheets_api()
+# ids = ""
+# with open("random_ids.txt", encoding="utf8") as f:
+    # ids = ",".join(f.readlines())
+# all_project_data, all_pub_data = retrieve_projects(ids)
+# if all_project_data:
+    # store_data(gsheet_url_proj, all_project_data)
+# if all_pub_data:
+    # store_data(gsheet_url_pub, all_pub_data)

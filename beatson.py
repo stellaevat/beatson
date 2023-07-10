@@ -7,14 +7,15 @@ from Bio import Entrez
 from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-
+from dataset import retrieve_projects
 
 st.set_page_config(page_title="BioProject Annotation")
 
 Entrez.email = "stell.aeva@hotmail.com"
-database = "bioproject"
-base_url = "https://www.ncbi.nlm.nih.gov/bioproject/"
-max_search_results = 10
+project_db = "bioproject"
+project_url = "https://www.ncbi.nlm.nih.gov/" + project_db + "/"
+pub_url = "https://pubmed.ncbi.nlm.nih.gov/"
+retmax = 10
 results_per_page = 10
 
 gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
@@ -30,10 +31,10 @@ scope_col = "Scope"
 org_col = "Organism"
 pub_col = "Publications"
 annot_col = "Labels"
-link_col = "Link"
+pmid_col = "PMIDs"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col]
 aggrid_columns = [acc_col, title_col, annot_col]
-detail_fields = [type_col, scope_col, org_col, link_col]
+detail_fields = [acc_col, type_col, scope_col, org_col, pmid_col]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
@@ -59,11 +60,11 @@ st.markdown(streamlit_css, unsafe_allow_html=True)
 
 
 
-def id_to_url(project_id):
-    return base_url + str(project_id) + "/"
+def id_to_url(base_url, page_id):
+    return base_url + str(page_id) + "/"
     
-def id_to_html_link(project_id):
-    return f'<a target="_blank" href="{base_url + str(project_id) + "/"}">{project_id}</a>'
+def id_to_html_link(base_url, page_id):
+    return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
     
 @st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
@@ -112,66 +113,29 @@ def submit_labels(project_id, gsheet_url_proj):
     st.session_state.new = ""
     
 @st.cache_data(show_spinner=False)
-def esearch(db=database, term="", retmax=max_search_results, idtype="acc"):
-    if not term:
+def esearch(database, terms):
+    if not terms:
         return None
-    handle = Entrez.esearch(db=db, term=term, retmax=retmax, idtype=idtype)
+    handle = Entrez.esearch(db=database, term=terms, retmax=retmax, idtype="acc")
     ids = Entrez.read(handle)["IdList"]
     return ids
-    
-@st.cache_data(show_spinner=False)
-def efetch(db=database, ids="", rettype="xml", retmode="xml"):
-    if not ids:
-        return None
-    handle = Entrez.efetch(db=db, id=ids, rettype=rettype, retmode=retmode)
-    tree = ET.parse(handle)
-    tag, project_dict = parse_xml(tree.getroot())
-    return project_dict
 
-def parse_xml(element):
-    data_dict = dict(element.attrib)
-    children = map(parse_xml, element)
-    children_nodes = defaultdict(list)
-    clean_nodes = {}
-    for node, data in children:
-        children_nodes[node].append(data)
-    for node, data_list in children_nodes.items():
-        clean_nodes[node] = data_list[0] if len(data_list) == 1 else data_list
-
-    if clean_nodes:
-        data_dict.update(clean_nodes)
-
-    if element.text is not None and not element.text.isspace():
-        data_dict['text'] = element.text
-    if len(data_dict) == 1 and 'text' in data_dict:
-        data_dict = data_dict['text']
-    tag = element.tag
-    return tag, data_dict
  
-# TODO: Adapt to new parsing 
 @st.cache_data(show_spinner=search_msg)
 def api_search(search_terms):
+    search_df, search_pub_df = None, None
     search_terms = [term.strip() for term in search_terms.split() if term.strip()]
     # TODO: find synonyms
-    ids = esearch(term="+AND+".join(search_terms))
-    if ids:
-        project_dict = efetch(ids=",".join(ids))
-        projects = project_dict['DocumentSummary']
-        if not isinstance(projects, list):
-            projects = [projects,]
-        uids, titles, urls = [], [], []
-        for project in projects:
-            if "error" not in project:
-                uids.append(project["acc"])
-                titles.append(project["Project"]["ProjectDescr"]["Title"])
-                urls.append(id_to_url(project["acc"]))
-        if uids:
-            search_df = pd.DataFrame(
-                {acc_col:uids, project_col:titles, url_col:urls}, 
-                columns=(acc_col, project_col, url_col)
-            )
-            search_df.set_index(acc_col, inplace=True)
-            return search_df
+    
+    ids = esearch(project_db, "+AND+".join(search_terms))
+    all_project_data, all_pub_data = retrieve_projects(ids)
+    if all_project_data:
+        search_df = pd.DataFrame(all_project_data)
+        if all_pub_data:
+            search_pub_df = pd.DataFrame(all_pub_data)
+                
+    return search_df, search_pub_df
+            
             
 @st.cache_data(show_spinner=search_msg)
 def local_search(search_terms, project_df, pub_df):
@@ -186,6 +150,7 @@ def local_search(search_terms, project_df, pub_df):
     
     search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
     return search_df
+    
     
 @st.cache_data(show_spinner=False)
 def build_interactive_grid(active_df, starting_page, selected_row_index):
@@ -227,14 +192,27 @@ def hide_details():
     return
     
 def display_project_details(project):
-    st.write(f"Accession: {project[acc_col]}, ID: {project[uid_col]}")
     st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
+    
+    pub_urls = ""
+    publications = project[pub_col]
+    if publications:
+        pub_urls = delimiter.join([id_to_html_link(pub_url, pub_id) for pub_id in publications.split(delimiter)])
+    project[pmid_col] = pub_urls
+    
+    df = pd.DataFrame(project[detail_fields])
+    df.loc[acc_col] = id_to_html_link(project_url, project[acc_col])
+    
+    for field in detail_fields:
+        if not project[field]:
+            df = df.drop(field)
+            
+    st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
+    st.write("")
+    st.write("")
+    
     if project[descr_col]:
         st.write(project[descr_col])
-    
-    project[link_col] = id_to_html_link(project[acc_col])
-    df = pd.DataFrame(project[detail_fields])
-    st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
 
     
 st.title("BioProject Annotation")
@@ -292,6 +270,8 @@ if not active_df.empty:
         show_details = st.button("Show details", key="show_button", on_click=show_details)
     else:
         hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
+    st.write("")
+    st.write("")
 
     if rerun:
         if not project_details_hidden:
@@ -311,9 +291,7 @@ if not active_df.empty:
     else:
         if not project_details_hidden:
             display_project_details(active_df.iloc[selected_row_index])
-
-st.write("")
-st.write("")
+            
 
 # ANNOTATION FUNCTION
 
@@ -353,4 +331,6 @@ def start_learning():
 st.header("Learn")
 st.write("Initiate learning algorithm:")
 learn_button = st.button("Start", on_click=start_learning)
+
+
     
