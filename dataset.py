@@ -110,7 +110,7 @@ def clean_text(data_dict):
         
         # TODO: If quotes useful, replace with single quote instead
         # For API call syntax purposes
-        data_dict[col] = data.replace('"', "").strip()
+        data_dict[col] = data.replace('"', "").strip().capitalize()
     return data_dict
     
 @st.cache_data    
@@ -132,6 +132,8 @@ def get_project_data(project):
     
     project_data["datatype"] = project_type.get("ProjectDataTypeSet", [{}])[0].get("DataType", "")
     project_data["scope"] = target.get("attrs", {}).get("sample_scope", "")
+    if project_data["scope"]:
+        project_data["scope"] = project_data["scope"][1:]
     project_data["organism"] = target.get("Organism", [{}])[0].get("OrganismName", "") 
     
     pub_list = []
