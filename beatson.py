@@ -1,10 +1,11 @@
-import re
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
+from streamlit.components.v1 import html
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
@@ -68,8 +69,6 @@ streamlit_css = r'''
     </style>
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
-
-
 
 def id_to_url(base_url, page_id):
     return base_url + str(page_id) + "/"
@@ -201,6 +200,7 @@ def hide_details():
     st.session_state.project_details_hidden = True
     
 def display_project_details(project):
+    st.write("")
     st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
     
     df = pd.DataFrame(project[detail_columns])
@@ -220,118 +220,6 @@ def display_project_details(project):
     if project[descr_col]:
         st.write(project[descr_col])
 
-    
-st.title("BioProject Annotation")
-
-# LOCAL SEARCH FUNCTION
-
-st.header("Search")
-
-search = st.text_input("Search:", label_visibility="collapsed", key="search").strip()
-if st.session_state.get("prev_search", "") != search:
-    st.session_state.selected_row_index = 0
-st.session_state.prev_search = search
-st.write("")
-
-connection = connect_gsheets_api()
-project_df = load_data(gsheet_url_proj, project_columns)
-pub_df = load_data(gsheet_url_pub, pub_columns)
-
-if search:     
-    search_df = local_search(search, project_df)
-    if search_df is not None and not search_df.empty:
-        st.write(f"Search results for '{search}':")
-        active_df = search_df
-    else:
-        st.write(f"No search results for '{search}'. All projects:")
-        active_df = project_df
-else:
-    st.write(f"All projects:")
-    active_df = project_df
-
-# PROJECT DATAFRAME
-
-rerun = st.session_state.get("rerun", 0)
-selected_row_index = st.session_state.get("selected_row_index", 0)
-starting_page = selected_row_index // results_per_page
-
-if not active_df.empty:
-    gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
-    grid = AgGrid(
-            active_df[aggrid_columns], 
-            gridOptions=gridOptions,
-            width="100%",
-            theme="alpine",
-            update_mode=GridUpdateMode.SELECTION_CHANGED,
-            custom_css=aggrid_css,
-            allow_unsafe_jscode=True,
-            reload_data=False,
-            enable_enterprise_modules=False
-        )
-    selected_row = grid['selected_rows']
-    selected_df = pd.DataFrame(selected_row)
-    previous_page = int(st.session_state.get("starting_page", 0))
-    project_details_hidden = st.session_state.get("project_details_hidden", True)
-    
-    if project_details_hidden:
-        show_details = st.button("Show details", key="show_button", on_click=show_details)
-    else:
-        hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
-    st.write("")
-    st.write("")
-
-    if rerun:
-        if not project_details_hidden:
-            display_project_details(active_df.iloc[selected_row_index])
-        st.session_state.starting_page = starting_page
-        st.session_state.rerun = 0
-        
-    elif not selected_df.empty:
-        selected_mask = active_df[acc_col].isin(selected_df[acc_col])
-        selected_data = active_df.loc[selected_mask]
-        
-        selected_row_index = selected_data.index.tolist()[0]
-        st.session_state.selected_row_index = selected_row_index
-        st.session_state.rerun = 1
-        
-        st.experimental_rerun()    
-    else:
-        if not project_details_hidden:
-            display_project_details(active_df.iloc[selected_row_index])
-            
-
-# ANNOTATION FUNCTION
-
-st.header("Annotate")
-        
-project_id = active_df.iloc[selected_row_index][acc_col]
-label_options = set()
-if not project_df.empty:
-    for annotation in project_df[label_col]:
-        if annotation is not None:
-            label_options.update(set(annotation.split(DELIMITER)))
-    label_options = sorted(list(label_options))
-    
-original_labels = project_df.at[selected_row_index, label_col]
-if original_labels is None:
-    original_labels = []
-else:
-    original_labels = original_labels.split(DELIMITER)
-
-with st.form(key="Annotate"):
-    st.write(f"Edit {project_id} labels:")
-    if label_options:
-        col1, col2 = st.columns(2)
-        with col1:
-            labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key="labels")
-        with col2:
-            new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
-    else:
-        labels = ""
-        new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
-        
-    submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(project_id, gsheet_url_proj))
-
 def check_dataset(message):
     y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
     label_sums = np.sum(y_labelled, axis=0)
@@ -350,19 +238,132 @@ def check_dataset(message):
         labelled_project_df = project_df.loc[project_df[label_col] is not None]
         X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
         return X_labelled, y_labelled
-        
-        
-        
-st.header("Predict")
-st.write("Run prediction algorithm:")
-message = st.empty()
-start_button = st.button("Start")
-st.write("")
-st.write("")
+
     
-if start_button:
-    X_labelled, y_labelled = check_dataset(message)
-    if X_labelled and y_labelled:
-        y_predicted, y_probabilities = predict(X_labelled, y_labelled)
+st.title("BioProject Annotation")
+annotate_tab, search_tab, predict_tab = st.tabs(["Annotate", "Search", "Predict"])
+
+with annotate_tab:
+    # LOCAL SEARCH FUNCTION
+    st.header("Find projects")
+
+    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key="search").strip()
+    if st.session_state.get("prev_search", "") != search:
+        st.session_state.selected_row_index = 0
+    st.session_state.prev_search = search
+    st.write("")
+
+    connection = connect_gsheets_api()
+    project_df = load_data(gsheet_url_proj, project_columns)
+    pub_df = load_data(gsheet_url_pub, pub_columns)
+
+    if search:     
+        search_df = local_search(search, project_df)
+        if search_df is not None and not search_df.empty:
+            st.write(f"Results for '{search}':")
+            active_df = search_df
+        else:
+            st.write(f"No results for '{search}'. All projects:")
+            active_df = project_df
+    else:
+        # st.write(f"All projects:")
+        active_df = project_df
+
+    # PROJECT DATAFRAME
+
+    rerun = st.session_state.get("rerun", 0)
+    selected_row_index = st.session_state.get("selected_row_index", 0)
+    starting_page = selected_row_index // results_per_page
+
+    if not active_df.empty:
+        gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
+        grid = AgGrid(
+                active_df[aggrid_columns], 
+                gridOptions=gridOptions,
+                width="100%",
+                theme="alpine",
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                custom_css=aggrid_css,
+                allow_unsafe_jscode=True,
+                reload_data=False,
+                enable_enterprise_modules=False
+            )
+        selected_row = grid['selected_rows']
+        selected_df = pd.DataFrame(selected_row)
+        previous_page = int(st.session_state.get("starting_page", 0))
+        project_details_hidden = st.session_state.get("project_details_hidden", True)
+        
+        if project_details_hidden:
+            show_details = st.button("Show details", key="show_button", on_click=show_details)
+        else:
+            hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
+        st.write("")
+
+        if rerun:
+            if not project_details_hidden:
+                display_project_details(active_df.iloc[selected_row_index])
+            st.session_state.starting_page = starting_page
+            st.session_state.rerun = 0
+            
+        elif not selected_df.empty:
+            selected_mask = active_df[acc_col].isin(selected_df[acc_col])
+            selected_data = active_df.loc[selected_mask]
+            
+            selected_row_index = selected_data.index.tolist()[0]
+            st.session_state.selected_row_index = selected_row_index
+            st.session_state.rerun = 1
+            
+            st.experimental_rerun()    
+        else:
+            if not project_details_hidden:
+                display_project_details(active_df.iloc[selected_row_index])
+                
+
+    # ANNOTATION FUNCTION
+
+    st.header("Annotate")
+            
+    project_id = active_df.iloc[selected_row_index][acc_col]
+    label_options = set()
+    if not project_df.empty:
+        for annotation in project_df[label_col]:
+            if annotation is not None:
+                label_options.update(set(annotation.split(DELIMITER)))
+        label_options = sorted(list(label_options))
+        
+    original_labels = project_df.at[selected_row_index, label_col]
+    if original_labels is None:
+        original_labels = []
+    else:
+        original_labels = original_labels.split(DELIMITER)
+
+    with st.form(key="Annotate"):
+        st.write(f"Edit {project_id} labels:")
+        if label_options:
+            col1, col2 = st.columns(2)
+            with col1:
+                labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key="labels")
+            with col2:
+                new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
+        else:
+            labels = ""
+            new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
+            
+        submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(project_id, gsheet_url_proj))      
+        
+with search_tab:
+    st.header("Search BioProject for more projects")
+        
+with predict_tab:
+    st.header("Predict annotations")
+    message = st.empty()
+    start_button = st.button("Start")
+    st.write("")
+    st.write("")
+        
+    if start_button:
+        X_labelled, y_labelled = check_dataset(message)
+        if X_labelled and y_labelled:
+            y_predicted, y_probabilities = predict(X_labelled, y_labelled)
 
     
