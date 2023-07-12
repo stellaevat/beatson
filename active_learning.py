@@ -169,13 +169,12 @@ def active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, iterat
 
         clf.fit(X_labelled, y_labelled)
     return clf
-    
-@st.cache_data(show_spinner=predict_msg)
-def predict(project_df, pub_df, text_columns, label_col, pmid_col, delimiter):
-    # Need to send in only the labelled ones
+
+def get_label_matrix(project_df, label_col, delimiter):
     labels = set()
     for annotation in project_df[label_col]:
-        labels.update(set(annotation.split(delimiter)))
+        if annotation is not None:
+            labels.update(set(annotation.split(delimiter)))
     
     i = 0
     label_to_index = {}
@@ -185,19 +184,27 @@ def predict(project_df, pub_df, text_columns, label_col, pmid_col, delimiter):
         index_to_label[i] = label
         i += 1
     
-    y_labelled = np.zeros((len(project_df), len(labels))
+    y_labelled = np.zeros((len(project_df), len(labels)))
     for i, annotation in enumerate(project_df[label_col]):
-        for label in annotation.split(delimiter):
-            y_labelled[i, label_to_index[label]] = 1
+        if annotation is not None:
+            for label in annotation.split(delimiter):
+                y_labelled[i, label_to_index[label]] = 1
             
+    return y_labelled, label_to_index, index_to_label
+    
+def get_sample_matrix(project_df, pub_df, text_columns, pub_col, pmid_col, delimiter):
     X_labelled = []
     for project in project_df:
         text = project_df[text_columns].str.join(" ")
-        if project[label_col]:
-            for pmid in project[label_col].split(delimiter):
-                text += " " + pub_df.loc[pub_df[pub_col] == pmid].str.join(" ")
+        if project[pub_col]:
+            for pmid in project[pub_col].split(delimiter):
+                text += " " + pub_df.loc[pub_df[pmid_col] == pmid].str.join(" ")
         X_labelled.append(text)
-            
+    return X_labelled
+    
+    
+@st.cache_data(show_spinner=predict_msg) 
+def predict(X_labelled, y_labelled):   
     # TODO: Ensure they are sparse matrices
     X_labelled = vectorizer.fit_transform(X_labelled)
     

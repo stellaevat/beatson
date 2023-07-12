@@ -8,6 +8,7 @@ from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
+from active_learning import get_label_matrix, get_sample_matrix
 
 st.set_page_config(page_title="BioProject Annotation")
 
@@ -21,6 +22,10 @@ results_per_page = 10
 gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
 gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 
+DELIMITER = ", "
+PROJECT_THRESHOLD = 10
+LABEL_THRESHOLD = 3
+
 uid_col = "UID"
 acc_col = "Accession"
 title_col = "Title"
@@ -33,11 +38,18 @@ pub_col = "PMIDs"
 label_col = "Labels"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, label_col]
 aggrid_columns = [acc_col, title_col, label_col]
-detail_fields = [acc_col, type_col, scope_col, org_col, pub_col]
+detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
+text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
+
+pmid_col = "PMID"
+pubtitle_col = "Title"
+abstract_col = "Abstract"
+mesh_col = "MeSH"
+key_col = "Keywords"
+pub_columns = [pmid_col, pubtitle_col, abstract_col, mesh_col, key_col]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
-delimiter = ", "
 
 primary_colour = "#81b1cc"
 aggrid_css = {
@@ -100,7 +112,7 @@ def submit_labels(project_id, gsheet_url_proj):
     
     if project_id:
         combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
-        labels_str = delimiter.join(sorted(list(combined)))
+        labels_str = DELIMITER.join(sorted(list(combined)))
         
         if combined ^ set(original_labels):
             update_annotation(gsheet_url_proj, project_id, labels_str)
@@ -184,22 +196,20 @@ def build_interactive_grid(active_df, starting_page, selected_row_index):
 
 def show_details():
     st.session_state.project_details_hidden = False
-    return
     
 def hide_details():
     st.session_state.project_details_hidden = True
-    return
     
 def display_project_details(project):
     st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
     
-    df = pd.DataFrame(project[detail_fields])
+    df = pd.DataFrame(project[detail_columns])
     df.loc[acc_col] = id_to_html_link(base_project_url, project[acc_col])
     
     if project[pub_col]:
-        df.loc[pub_col] = delimiter.join([id_to_html_link(base_pub_url, pub_id) for pub_id in project[pub_col].split(delimiter)])
+        df.loc[pub_col] = DELIMITER.join([id_to_html_link(base_pub_url, pub_id) for pub_id in project[pub_col].split(DELIMITER)])
     
-    for field in detail_fields:
+    for field in detail_columns:
         if not project[field]:
             df = df.drop(field)
             
@@ -225,6 +235,7 @@ st.write("")
 
 connection = connect_gsheets_api()
 project_df = load_data(gsheet_url_proj, project_columns)
+pub_df = load_data(gsheet_url_pub, pub_columns)
 
 if search:     
     search_df = local_search(search, project_df)
@@ -298,14 +309,14 @@ label_options = set()
 if not project_df.empty:
     for annotation in project_df[label_col]:
         if annotation is not None:
-            label_options.update(set(annotation.split(delimiter)))
+            label_options.update(set(annotation.split(DELIMITER)))
     label_options = sorted(list(label_options))
     
 original_labels = project_df.at[selected_row_index, label_col]
 if original_labels is None:
     original_labels = []
 else:
-    original_labels = original_labels.split(delimiter)
+    original_labels = original_labels.split(DELIMITER)
 
 with st.form(key="Annotate"):
     st.write(f"Edit {project_id} labels:")
@@ -321,12 +332,37 @@ with st.form(key="Annotate"):
         
     submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(project_id, gsheet_url_proj))
 
-def start_learning():
-    return
+def check_dataset(message):
+    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
+    label_sums = np.sum(y_labelled, axis=0)
+    project_sum = np.sum(y_labelled, axis=1)
+    labelled_projects = len(project_sum[project_sum > 0]) 
+    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
 
-st.header("Learn")
-st.write("Initiate learning algorithm:")
-learn_button = st.button("Start", on_click=start_learning)
-
+    if labelled_projects < PROJECT_THRESHOLD:
+        message.write(f"So far {labelled_projects} projects have been annotated. For the algorithm to work well please find at least {PROJECT_THRESHOLD - labelled_projects} more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
+        return None, None
+    elif len(rare_labels) > 0:
+        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as any of the following: {', '.join([index_to_label[i] for i in rare_labels])}.")
+        return None, None
+    else:
+        message.write("Ready to predict. You will be asked for some more annotations as the algorithm is running.")
+        labelled_project_df = project_df.loc[project_df[label_col] is not None]
+        X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
+        return X_labelled, y_labelled
+        
+        
+        
+st.header("Predict")
+st.write("Run prediction algorithm:")
+message = st.empty()
+start_button = st.button("Start")
+st.write("")
+st.write("")
+    
+if start_button:
+    X_labelled, y_labelled = check_dataset(message)
+    if X_labelled and y_labelled:
+        y_predicted, y_probabilities = predict(X_labelled, y_labelled)
 
     
