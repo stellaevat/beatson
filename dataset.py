@@ -35,8 +35,8 @@ def store_data(gsheet_url, entries):
     columns = list(entries[0].keys())
     values = []
     for entry in entries:
-        entry_vals = [entry[col] for col in columns]
-        entry_str = '("' + '", "'.join([str(val) for val in entry_vals]) + '")'
+        entry_vals = ["'" + str(val) if str(val).isnumeric() else val for val in entry_vals]
+        entry_str = '("' + '", "'.join([val for val in entry_vals]) + '")'
         values.append(entry_str)
         
     for batch in range(0, len(values), api_calls_pm_google):
@@ -110,9 +110,7 @@ def clean_text(data_dict):
         # TODO: If quotes useful, replace with single quote instead
         # For API call syntax purposes
         data = data.replace('"', "").strip()
-        if data.isnumeric():
-            data = "'" + str(data)
-        elif len(data) > 1:
+        if len(data) > 1:
             data = data[0].upper() + data[1:]
         else:
             data = data.upper()
@@ -159,7 +157,7 @@ def get_publication_data(pub):
     pub_data = {}
     article = pub.get("Article", [{}])[0]
     
-    pub_data["pmid"] = "'" + pub.get("PMID", [{}])[0].get("text", "")
+    pub_data["pmid"] = pub.get("PMID", [{}])[0].get("text", "")
     pub_data["title"] = article.get("ArticleTitle", "")
     
     clean = []
@@ -192,7 +190,7 @@ def get_publication_data(pub):
     pub_data = clean_text(pub_data)
     return pub_data
     
-@st.cache_data(show_spinner="Getting search results...")
+@st.cache_data(show_spinner=False)
 def retrieve_projects(ids):
     all_project_data, all_pub_data = [], []
     

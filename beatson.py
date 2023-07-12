@@ -32,7 +32,7 @@ acc_col = "Accession"
 title_col = "Title"
 name_col = "Name"
 descr_col = "Description"
-type_col = "Data Type"
+type_col = "Data_Type"
 scope_col = "Scope"
 org_col = "Organism"
 pub_col = "PMIDs"
@@ -91,41 +91,6 @@ def load_data(gsheet_url, _columns):
         df.columns = _columns
     return df
     
-def update_annotation(gsheet_url_proj, project_id, labels):
-    update = f"""
-            UPDATE "{gsheet_url_proj}"
-            SET {label_col} = "{labels}"
-            WHERE {acc_col} = "{project_id}"
-            """
-    connection.execute(update)
- 
-def get_project_labels(df, selected_row_index):
-    project_labels = df.at[selected_row_index, label_col]
-    if project_labels is None:
-        return []
-    else:
-        return project_labels.split(DELIMITER)
- 
-def submit_labels(df, tab, gsheet_url):
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
-    original_labels = get_project_labels(df, selected_row_index)
-    
-    labels = st.session_state.get(tab + "_labels", "")
-    new = st.session_state.get(tab + "_new", "")
-    combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
-    
-    # If they don't contain the same distinct elements
-    if combined ^ set(original_labels):
-        labels_str = DELIMITER.join(sorted(list(combined)))
-        update_annotation(gsheet_url, project_id, labels_str)
-        if labels_str:
-            df.at[selected_row_index, label_col] = labels_str
-        else:
-            df.at[selected_row_index, label_col] = None
-            
-    st.session_state[tab + "_new"] = ""
-    
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
     if not terms:
@@ -135,38 +100,48 @@ def esearch(database, terms):
     return ids
 
  
-@st.cache_data(show_spinner=search_msg)
+@st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms):
     search_df, search_pub_df = None, None
-    search_terms = [term.strip() for term in search_terms.split() if term.strip()]
+    search_terms = [term.strip().lower() for term in search_terms.split() if term.strip()]
     # TODO: find synonyms
     
-    ids = esearch(project_db, "+AND+".join(search_terms))
+    ids = esearch(project_db, "+OR+".join(search_terms))
     all_project_data, all_pub_data = retrieve_projects(ids)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
+        search_df.columns = project_columns[:-1]
+        search_df[label_col] = None
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
+            search_pub_df.columns = pub_columns
+            
+        # TODO: Should these be removed or just show up with their labels?
+        projects_to_drop = []
+        for i, row in search_df.iterrows():
+            if row[acc_col] in project_df[acc_col].unique():
+                projects_to_drop.append(i)
+        search_df = search_df.drop(projects_to_drop)
                 
     return search_df, search_pub_df
             
             
-@st.cache_data(show_spinner=search_msg)
-def local_search(search_terms, project_df):
+@st.cache_resource(show_spinner=search_msg)
+def local_search(search_terms, df):
     search_terms = [term.strip() for term in search_terms.split() if term.strip()]
     search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
     # TODO: find synonyms
     
-    raw_counts = np.column_stack([project_df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in project_df])
+    raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
     total_counts = np.sum(raw_counts, axis=1)
     mask = np.where(total_counts > 0, True, False)
-    search_df = project_df.loc[mask]
+    search_df = df.loc[mask]
     
     search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
     return search_df
     
 def display_search_feature(tab):
-    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key="search").strip()
+    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
     st.write("")
     
     if st.session_state.get(tab + "_prev_search", "") != search:
@@ -236,7 +211,7 @@ def get_grid_options(df, starting_page, selected_row_index):
     grid_options = builder.build()
     return grid_options
     
-def display_interactive_grid(df, tab):
+def display_interactive_grid(tab, df):
     rerun = st.session_state.get(tab + "_rerun", 0)
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     starting_page = selected_row_index // results_per_page
@@ -259,9 +234,9 @@ def display_interactive_grid(df, tab):
     project_details_hidden = st.session_state.get(tab + "_project_details_hidden", True)
     
     if project_details_hidden:
-        st.button("Show details", on_click=show_details, args=(tab,))
+        st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
     else:
-        st.button("Hide details", on_click=hide_details, args=(tab,))
+        st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
     st.write("")
 
     if rerun:
@@ -284,7 +259,76 @@ def display_interactive_grid(df, tab):
             display_project_details(df.iloc[selected_row_index])
 
 
-def display_annotation_feature(df, tab):
+def update_annotation(project_id, labels):
+    update = f"""
+            UPDATE "{gsheet_url_proj}"
+            SET {label_col} = "{labels}"
+            WHERE {acc_col} = "{project_id}"
+            """
+    connection.execute(update)
+    
+def insert_annotation(values):
+    values = ["'" + str(val) if str(val).isnumeric() else val for val in values]
+    values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
+    insert = f''' 
+            INSERT INTO "{gsheet_url_proj}" ({", ".join(project_columns)})
+            VALUES {values_str}
+            '''
+    connection.execute(insert)
+    
+def insert_publication(values):
+    values = ["'" + str(val) if str(val).isnumeric() else val for val in values]
+    values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
+    insert = f''' 
+            INSERT INTO "{gsheet_url_pub}" ({", ".join(pub_columns)})
+            VALUES {values_str}
+            '''
+    connection.execute(insert)
+ 
+def get_project_labels(project_id):
+    if project_id in project_df[acc_col].unique():
+        project_labels = project_df[project_df[acc_col] == project_id][label_col].values[0]
+        if project_labels is not None:
+            return project_labels.split(DELIMITER)
+            
+    return []
+        
+ 
+def update_labels(tab, df, pub_df=None):
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
+    
+    existing = st.session_state.get(tab + "_labels", "")
+    new = st.session_state.get(tab + "_new", "")
+    updated_labels = (set(existing) | {n.strip() for n in new.split(",")}) - {""}
+    updated_labels_str = DELIMITER.join(sorted(list(updated_labels)))
+    
+    if project_id in project_df[acc_col].unique():
+        original_labels = get_project_labels(project_id)
+        if updated_labels ^ set(original_labels):
+            update_annotation(project_id, updated_labels_str)
+            
+            if updated_labels_str:
+                project_df.loc[project_df[acc_col] == project_id, label_col] = updated_labels_str
+            else:
+                project_df.loc[project_df[acc_col] == project_id, label_col] = None
+    else:
+        # Global variable used so display actually changed
+        api_project_df.at[selected_row_index, label_col] = updated_labels_str
+        project_values = df.iloc[selected_row_index]
+        
+        project_df.loc[len(project_df.index)] = project_values.tolist()
+        insert_annotation(project_values.tolist())
+        
+        if pub_df is not None and project_values[pub_col] is not None:
+            for pmid in project_values[pub_col].split(DELIMITER):
+                if pmid in pub_df[pmid_col].unique():
+                    pub_values = pub_df.loc[pub_df[pmid_col] == pmid].squeeze()
+                    insert_publication(pub_values.tolist())
+            
+    st.session_state[tab + "_new"] = ""
+
+def display_annotation_feature(tab, df, pub_df=None):
     st.header("Annotate")
     
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
@@ -298,9 +342,9 @@ def display_annotation_feature(df, tab):
                 label_options.update(set(annotation.split(DELIMITER)))
         label_options = sorted(list(label_options))
     
-    original_labels = get_project_labels(df, selected_row_index)
+    original_labels = get_project_labels(project_id)
 
-    with st.form(key="annotation_form"):
+    with st.form(key=(tab + "_annotation_form")):
         st.write(f"Edit {project_id} labels:")
         if label_options:
             col1, col2 = st.columns(2)
@@ -312,7 +356,7 @@ def display_annotation_feature(df, tab):
             labels = ""
             new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
             
-        submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(df, tab, gsheet_url_proj))
+        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df))
  
 def check_dataset(message):
     y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
@@ -325,7 +369,7 @@ def check_dataset(message):
         message.write(f"So far {labelled_projects} projects have been annotated. For the algorithm to work well please find at least {PROJECT_THRESHOLD - labelled_projects} more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
         return None, None
     elif len(rare_labels) > 0:
-        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as any of the following: {', '.join([index_to_label[i] for i in rare_labels])}.")
+        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as any of the following: {', '.join([index_to_label[i] for i in rare_labels])}. Use the Search tab to search the BioProject database directly if the annotation dataset is insufficient.")
         return None, None
     else:
         message.write("Ready to predict. You will be asked for some more annotations as the algorithm is running.")
@@ -344,30 +388,40 @@ pub_df = load_data(gsheet_url_pub, pub_columns)
     
 with annotate_tab:
     st.header("Find projects")
-    
-    tab = "Annotate"
+    tab_1 = "Annotate"
     annotate_df = project_df
 
     if not project_df.empty:
-        search = display_search_feature(tab)
+        search_terms = display_search_feature(tab_1)
         
-        if search:   
-            search_df = local_search(search, project_df)
+        if search_terms:   
+            search_df = local_search(search_terms, project_df)
             if search_df is not None and not search_df.empty:
-                st.write(f"Results for '{search}':")
+                st.write(f"Results for '{search_terms}':")
                 annotate_df = search_df
             else:
-                st.write(f"No results for '{search}'. All projects:")
+                st.write(f"No results for '{search_terms}'. All projects:")
         
         if not annotate_df.empty:
-            display_interactive_grid(annotate_df, tab)
-            display_annotation_feature(annotate_df, tab)
+            display_interactive_grid(tab_1, annotate_df)
+            display_annotation_feature(tab_1, annotate_df)
         
     else:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
 
 with search_tab:
     st.header("Search BioProject for more projects")
+    tab_2 = "Search"
+    
+    api_terms = display_search_feature(tab_2)
+    if api_terms:
+        api_project_df, api_pub_df = api_search(api_terms)
+        if api_project_df is not None and not api_project_df.empty:
+            st.write(f"Results for '{api_terms}':")
+            display_interactive_grid(tab_2, api_project_df)
+            display_annotation_feature(tab_2, api_project_df, api_pub_df)
+        else:
+            st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
         
 with predict_tab:
     st.header("Predict annotations")
@@ -392,5 +446,3 @@ with predict_tab:
         # clf.fit(X_labelled, y_labelled)
         
         # st.session_state.iteration = iteration + 1
-
-    
