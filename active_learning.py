@@ -15,9 +15,6 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 # TODO: Replace with appropriate model
 nlp = spacy.load("en_core_web_sm")
-vectorizer = TfidfVectorizer(tokenizer=lambda x:[token.lemma_.lower() for token in nlp(x) if not (token.is_stop or token.is_punct or token.is_space)])
-## TODO: Is there any way to fix random state of OVR too?
-clf = OneVsRestClassifier(estimator=SVC(kernel='rbf', probability=True, random_state=42))
 
 LABELLED, UNLABELLED, TEST = 0.6, 0.2, 0.2
 ITERATIONS = 10
@@ -27,6 +24,17 @@ metrics = {'Accuracy': accuracy_score,
            'Recall': recall_score,
            'F1': f1_score}
 predict_msg = "Running prediction algorithm..."
+
+@st.cache_resource(show_spinner=False)
+def get_classifier():
+    ## TODO: Is there any way to fix random state of OVR too?
+    clf = OneVsRestClassifier(estimator=SVC(kernel='rbf', probability=True, random_state=42))
+    return clf
+    
+@st.cache_resource(show_spinner=False)
+def get_vectorizer():
+    vectorizer = TfidfVectorizer(tokenizer=lambda x:[token.lemma_.lower() for token in nlp(x) if not (token.is_stop or token.is_punct or token.is_space)])
+    return vectorizer
 
 
 # MMC Algorithm
@@ -102,10 +110,10 @@ def binmin_query_selection(X_unlabelled, selection):
 # Testing version
     
 @st.cache_data(show_spinner="Running algorithm on test data...")
-def test_active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, y_unlabelled, iterations=ITERATIONS, selection=SELECTION):
+def test_active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, y_unlabelled):
     clf.fit(X_labelled, y_labelled)
-    for i in tqdm(range(iterations)):      
-        to_label, not_to_label = binmin_query_selection(X_unlabelled, selection)
+    for i in tqdm(range(ITERATIONS)):      
+        to_label, not_to_label = binmin_query_selection(X_unlabelled, SELECTION)
 
         # Pseudo-query for labels
         X_labelled = vstack((X_labelled, X_unlabelled[to_label]))
@@ -140,7 +148,7 @@ def test():
     
     X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test = preprocess_dataset(X, y)
 
-    clf_trained = active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, y_unlabelled, ITERATIONS, SELECTION)
+    clf_trained = active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, y_unlabelled)
     
     # TODO: get probability of each prediction too
     y_predicted = clf_trained.predict(X_unlabelled)
@@ -154,21 +162,7 @@ def test():
   
 # Web-app version
 
-@st.cache_data(show_spinner=False)
-def active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, iterations=ITERATIONS, selection=SELECTION):
-    clf.fit(X_labelled, y_labelled)
-    for i in tqdm(range(iterations)):      
-        to_label, not_to_label = binmin_query_selection(X_unlabelled, selection)
 
-        # Query researchers for labels
-        new_labels = None
-        
-        y_labelled = np.vstack((y_labelled, new_labels))
-        X_labelled = vstack((X_labelled, X_unlabelled[to_label]))
-        X_unlabelled = X_unlabelled[not_to_label]
-
-        clf.fit(X_labelled, y_labelled)
-    return clf
 
 def get_label_matrix(project_df, label_col, delimiter):
     labels = set()
@@ -201,22 +195,42 @@ def get_sample_matrix(project_df, pub_df, text_columns, pub_col, pmid_col, delim
                 text += " " + pub_df.loc[pub_df[pmid_col] == pmid].str.join(" ")
         X_labelled.append(text)
     return X_labelled
+ 
+
+@st.cache_data(show_spinner=predict_msg)
+def active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled):
+    iteration = st.session_state.get("iteration", 0)
+    if iteration >= ITERATIONS:
+        return True
+            
+    to_label, not_to_label = binmin_query_selection(X_unlabelled, SELECTION)
+
+    # Query researchers for labels
+    new_labels = None
     
+    y_labelled = np.vstack((y_labelled, new_labels))
+    X_labelled = vstack((X_labelled, X_unlabelled[to_label]))
+    X_unlabelled = X_unlabelled[not_to_label]
+
+    clf.fit(X_labelled, y_labelled)
     
-@st.cache_data(show_spinner=predict_msg) 
-def predict(X_labelled, y_labelled):   
-    # TODO: Ensure they are sparse matrices
+    st.session_state.iteration = iteration + 1
+    return False 
+    
+@st.cache_data(show_spinner=False) 
+def learn(X_labelled, y_labelled):
+    vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
-    
     # TODO: Load from gsheet
     X_unlabelled = None
     X_unlabelled = vectorizer.transform(X_unlabelled)
+    to_label, not_to_label = None, None
     
-    clf_trained = active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled, ITERATIONS, SELECTION)
+    clf = get_classifier()
+    clf.fit(X_labelled, y_labelled)
     
-    # Transform back to original labels (index_to_label)
-    y_predicted = clf_trained.predict(X_unlabelled)
-    # TODO: get probability/metrics of each prediction too (is it meant to be for each label separately?)
-    y_probabilities = None
+    iteration = st.session_state.get("iteration", 0)
+    if iteration < ITERATIONS:
+        to_label, not_to_label = binmin_query_selection(X_unlabelled, SELECTION)
     
-    return y_predicted, y_probabilities
+    return X_unlabelled, to_label, not_to_label

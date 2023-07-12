@@ -56,7 +56,7 @@ primary_colour = "#81b1cc"
 aggrid_css = {
         "#gridToolBar": {"display": "none;"},
         ".ag-theme-alpine, .ag-theme-alpine-dark": {"--ag-font-size": "12px;"},
-        ".ag-cell": {"padding": "0px 12px;"}
+        ".ag-cell": {"padding": "0px 12px;"},
     }
 streamlit_css = r'''
     <style>
@@ -69,12 +69,6 @@ streamlit_css = r'''
     </style>
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
-
-def id_to_url(base_url, page_id):
-    return base_url + str(page_id) + "/"
-    
-def id_to_html_link(base_url, page_id):
-    return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
     
 @st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
@@ -104,23 +98,33 @@ def update_annotation(gsheet_url_proj, project_id, labels):
             WHERE {acc_col} = "{project_id}"
             """
     connection.execute(update)
+ 
+def get_project_labels(df, selected_row_index):
+    project_labels = df.at[selected_row_index, label_col]
+    if project_labels is None:
+        return []
+    else:
+        return project_labels.split(DELIMITER)
+ 
+def submit_labels(df, tab, gsheet_url):
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
+    original_labels = get_project_labels(df, selected_row_index)
     
-def submit_labels(project_id, gsheet_url_proj):
-    new = st.session_state.get("new", "")
-    labels = st.session_state.get("labels", "")
+    labels = st.session_state.get(tab + "_labels", "")
+    new = st.session_state.get(tab + "_new", "")
+    combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
     
-    if project_id:
-        combined = (set(labels) | {l.strip() for l in new.split(",")}) - {""}
+    # If they don't contain the same distinct elements
+    if combined ^ set(original_labels):
         labels_str = DELIMITER.join(sorted(list(combined)))
-        
-        if combined ^ set(original_labels):
-            update_annotation(gsheet_url_proj, project_id, labels_str)
-            if labels_str:
-                active_df.at[selected_row_index, label_col] = labels_str
-            else:
-                active_df.at[selected_row_index, label_col] = None
+        update_annotation(gsheet_url, project_id, labels_str)
+        if labels_str:
+            df.at[selected_row_index, label_col] = labels_str
+        else:
+            df.at[selected_row_index, label_col] = None
             
-    st.session_state.new = ""
+    st.session_state[tab + "_new"] = ""
     
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
@@ -161,9 +165,48 @@ def local_search(search_terms, project_df):
     search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
     return search_df
     
+def display_search_feature(tab):
+    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key="search").strip()
+    st.write("")
     
+    if st.session_state.get(tab + "_prev_search", "") != search:
+        st.session_state[tab + "_selected_row_index"] = 0
+    st.session_state[tab + "_prev_search"] = search
+    
+    return search
+
+def id_to_url(base_url, page_id):
+    return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
+   
+def display_project_details(project):
+    st.write("")
+    st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
+    
+    df = pd.DataFrame(project[detail_columns])
+    df.loc[acc_col] = id_to_url(base_project_url, project[acc_col])
+    
+    if project[pub_col]:
+        df.loc[pub_col] = DELIMITER.join([id_to_url(base_pub_url, pub_id) for pub_id in project[pub_col].split(DELIMITER)])
+    
+    for field in detail_columns:
+        if not project[field]:
+            df = df.drop(field)
+            
+    st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
+    st.write("")
+    st.write("")
+    
+    if project[descr_col]:
+        st.write(project[descr_col])
+        
+def show_details(tab):
+    st.session_state[tab + "_project_details_hidden"] = False
+    
+def hide_details(tab):
+    st.session_state[tab + "_project_details_hidden"] = True
+
 @st.cache_data(show_spinner=False)
-def build_interactive_grid(active_df, starting_page, selected_row_index):
+def get_grid_options(df, starting_page, selected_row_index):
     options_dict = {
         "enableCellTextSelection" : True,
         "onFirstDataRendered" : JsCode("""
@@ -180,7 +223,7 @@ def build_interactive_grid(active_df, starting_page, selected_row_index):
         """)
     }
     
-    builder = GridOptionsBuilder.from_dataframe(active_df[aggrid_columns])
+    builder = GridOptionsBuilder.from_dataframe(df[aggrid_columns])
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
     builder.configure_column(title_col, flex=3.5)
@@ -190,36 +233,87 @@ def build_interactive_grid(active_df, starting_page, selected_row_index):
     builder.configure_grid_options(**options_dict)
     builder.configure_side_bar()
 
-    gridOptions = builder.build()
-    return gridOptions
+    grid_options = builder.build()
+    return grid_options
+    
+def display_interactive_grid(df, tab):
+    rerun = st.session_state.get(tab + "_rerun", 0)
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    starting_page = selected_row_index // results_per_page
 
-def show_details():
-    st.session_state.project_details_hidden = False
+    grid_options = get_grid_options(df, starting_page, selected_row_index)
+    grid = AgGrid(
+        df[aggrid_columns], 
+        gridOptions=grid_options,
+        width="100%",
+        theme="alpine",
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        custom_css=aggrid_css,
+        allow_unsafe_jscode=True,
+        reload_data=False,
+        enable_enterprise_modules=False
+    )
+    selected_row = grid['selected_rows']
+    selected_df = pd.DataFrame(selected_row)
+    previous_page = st.session_state.get(tab + "_starting_page", 0)
+    project_details_hidden = st.session_state.get(tab + "_project_details_hidden", True)
     
-def hide_details():
-    st.session_state.project_details_hidden = True
-    
-def display_project_details(project):
+    if project_details_hidden:
+        st.button("Show details", on_click=show_details, args=(tab,))
+    else:
+        st.button("Hide details", on_click=hide_details, args=(tab,))
     st.write("")
-    st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
+
+    if rerun:
+        if not project_details_hidden:
+            display_project_details(df.iloc[selected_row_index])
+        st.session_state[tab + "_starting_page"] = starting_page
+        st.session_state[tab + "_rerun"] = 0
+        
+    elif not selected_df.empty:
+        selected_mask = df[acc_col].isin(selected_df[acc_col])
+        selected_data = df.loc[selected_mask]
+        
+        selected_row_index = selected_data.index.tolist()[0]
+        st.session_state[tab + "_selected_row_index"] = selected_row_index
+        st.session_state[tab + "_rerun"] = 1
+        
+        st.experimental_rerun()    
+    else:
+        if not project_details_hidden:
+            display_project_details(df.iloc[selected_row_index])
+
+
+def display_annotation_feature(df, tab):
+    st.header("Annotate")
     
-    df = pd.DataFrame(project[detail_columns])
-    df.loc[acc_col] = id_to_html_link(base_project_url, project[acc_col])
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
     
-    if project[pub_col]:
-        df.loc[pub_col] = DELIMITER.join([id_to_html_link(base_pub_url, pub_id) for pub_id in project[pub_col].split(DELIMITER)])
+    # TODO: May want to move this outside method
+    label_options = set()
+    if not project_df.empty:
+        for annotation in project_df[label_col]:
+            if annotation is not None:
+                label_options.update(set(annotation.split(DELIMITER)))
+        label_options = sorted(list(label_options))
     
-    for field in detail_columns:
-        if not project[field]:
-            df = df.drop(field)
+    original_labels = get_project_labels(df, selected_row_index)
+
+    with st.form(key="annotation_form"):
+        st.write(f"Edit {project_id} labels:")
+        if label_options:
+            col1, col2 = st.columns(2)
+            with col1:
+                labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key=(tab + "_labels"))
+            with col2:
+                new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+        else:
+            labels = ""
+            new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
             
-    st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
-    st.write("")
-    st.write("")
-    
-    if project[descr_col]:
-        st.write(project[descr_col])
-
+        submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(df, tab, gsheet_url_proj))
+ 
 def check_dataset(message):
     y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
     label_sums = np.sum(y_labelled, axis=0)
@@ -238,119 +332,40 @@ def check_dataset(message):
         labelled_project_df = project_df.loc[project_df[label_col] is not None]
         X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
         return X_labelled, y_labelled
-
-    
+        
+        
+ 
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(["Annotate", "Search", "Predict"])
 
+connection = connect_gsheets_api()
+project_df = load_data(gsheet_url_proj, project_columns)
+pub_df = load_data(gsheet_url_pub, pub_columns)
+    
 with annotate_tab:
-    # LOCAL SEARCH FUNCTION
     st.header("Find projects")
+    
+    tab = "Annotate"
+    annotate_df = project_df
 
-    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key="search").strip()
-    if st.session_state.get("prev_search", "") != search:
-        st.session_state.selected_row_index = 0
-    st.session_state.prev_search = search
-    st.write("")
-
-    connection = connect_gsheets_api()
-    project_df = load_data(gsheet_url_proj, project_columns)
-    pub_df = load_data(gsheet_url_pub, pub_columns)
-
-    if search:     
-        search_df = local_search(search, project_df)
-        if search_df is not None and not search_df.empty:
-            st.write(f"Results for '{search}':")
-            active_df = search_df
-        else:
-            st.write(f"No results for '{search}'. All projects:")
-            active_df = project_df
-    else:
-        # st.write(f"All projects:")
-        active_df = project_df
-
-    # PROJECT DATAFRAME
-
-    rerun = st.session_state.get("rerun", 0)
-    selected_row_index = st.session_state.get("selected_row_index", 0)
-    starting_page = selected_row_index // results_per_page
-
-    if not active_df.empty:
-        gridOptions = build_interactive_grid(active_df, starting_page, selected_row_index)
-        grid = AgGrid(
-                active_df[aggrid_columns], 
-                gridOptions=gridOptions,
-                width="100%",
-                theme="alpine",
-                update_mode=GridUpdateMode.SELECTION_CHANGED,
-                custom_css=aggrid_css,
-                allow_unsafe_jscode=True,
-                reload_data=False,
-                enable_enterprise_modules=False
-            )
-        selected_row = grid['selected_rows']
-        selected_df = pd.DataFrame(selected_row)
-        previous_page = int(st.session_state.get("starting_page", 0))
-        project_details_hidden = st.session_state.get("project_details_hidden", True)
-        
-        if project_details_hidden:
-            show_details = st.button("Show details", key="show_button", on_click=show_details)
-        else:
-            hide_details = st.button("Hide details", key="hide_button", on_click=hide_details)
-        st.write("")
-
-        if rerun:
-            if not project_details_hidden:
-                display_project_details(active_df.iloc[selected_row_index])
-            st.session_state.starting_page = starting_page
-            st.session_state.rerun = 0
-            
-        elif not selected_df.empty:
-            selected_mask = active_df[acc_col].isin(selected_df[acc_col])
-            selected_data = active_df.loc[selected_mask]
-            
-            selected_row_index = selected_data.index.tolist()[0]
-            st.session_state.selected_row_index = selected_row_index
-            st.session_state.rerun = 1
-            
-            st.experimental_rerun()    
-        else:
-            if not project_details_hidden:
-                display_project_details(active_df.iloc[selected_row_index])
-                
-
-    # ANNOTATION FUNCTION
-
-    st.header("Annotate")
-            
-    project_id = active_df.iloc[selected_row_index][acc_col]
-    label_options = set()
     if not project_df.empty:
-        for annotation in project_df[label_col]:
-            if annotation is not None:
-                label_options.update(set(annotation.split(DELIMITER)))
-        label_options = sorted(list(label_options))
+        search = display_search_feature(tab)
         
-    original_labels = project_df.at[selected_row_index, label_col]
-    if original_labels is None:
-        original_labels = []
+        if search:   
+            search_df = local_search(search, project_df)
+            if search_df is not None and not search_df.empty:
+                st.write(f"Results for '{search}':")
+                annotate_df = search_df
+            else:
+                st.write(f"No results for '{search}'. All projects:")
+        
+        if not annotate_df.empty:
+            display_interactive_grid(annotate_df, tab)
+            display_annotation_feature(annotate_df, tab)
+        
     else:
-        original_labels = original_labels.split(DELIMITER)
+        st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
 
-    with st.form(key="Annotate"):
-        st.write(f"Edit {project_id} labels:")
-        if label_options:
-            col1, col2 = st.columns(2)
-            with col1:
-                labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key="labels")
-            with col2:
-                new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key="new")
-        else:
-            labels = ""
-            new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key="new")
-            
-        submit_button = st.form_submit_button("Update", on_click=submit_labels, args=(project_id, gsheet_url_proj))      
-        
 with search_tab:
     st.header("Search BioProject for more projects")
         
@@ -361,9 +376,21 @@ with predict_tab:
     st.write("")
     st.write("")
         
-    if start_button:
-        X_labelled, y_labelled = check_dataset(message)
-        if X_labelled and y_labelled:
-            y_predicted, y_probabilities = predict(X_labelled, y_labelled)
+    # if start_button:
+        # X_labelled, y_labelled = check_dataset(message)
+        # if X_labelled and y_labelled:
+            # X_unlabelled, to_label, not_to_label = learn(X_labelled, y_labelled)
+            
+            # if to_label:
+                # learn_df = pd.DataFrame(X_unlabelled[to_label])
+        # new_labels = None
+        
+        # y_labelled = np.vstack((y_labelled, new_labels))
+        # X_labelled = vstack((X_labelled, X_unlabelled[to_label]))
+        # X_unlabelled = X_unlabelled[not_to_label]
+
+        # clf.fit(X_labelled, y_labelled)
+        
+        # st.session_state.iteration = iteration + 1
 
     
