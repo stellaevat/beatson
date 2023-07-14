@@ -218,11 +218,10 @@ def active_learning_classifier(clf, X_labelled, y_labelled, X_unlabelled):
     return False 
     
 @st.cache_data(show_spinner=False) 
-def learn(X_labelled, y_labelled):
+def learn(X_labelled, y_labelled, iteration):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
-    # TODO: Load from gsheet
-    X_unlabelled = None
+    X_unlabelled = None # TODO: Load from gsheet
     X_unlabelled = vectorizer.transform(X_unlabelled)
     to_label, not_to_label = None, None
     
@@ -232,5 +231,13 @@ def learn(X_labelled, y_labelled):
     iteration = st.session_state.get("iteration", 0)
     if iteration < ITERATIONS:
         to_label, not_to_label = binmin_query_selection(X_unlabelled, SELECTION)
+        st.session_state.iteration = iteration + 1
     
     return X_unlabelled, to_label, not_to_label
+    
+    
+def get_iteration():
+    print(st.session_state.iteration)
+    if not "iteration" in st.session_state:
+        st.session_state.iteration = 500
+    return st.session_state.iteration

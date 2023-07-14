@@ -117,11 +117,10 @@ def api_search(search_terms):
             search_pub_df.columns = pub_columns
             
         # TODO: Should these be removed or just show up with their labels?
-        projects_to_drop = []
         for i, row in search_df.iterrows():
-            if row[acc_col] in project_df[acc_col].unique():
-                projects_to_drop.append(i)
-        search_df = search_df.drop(projects_to_drop)
+            project_id = row[acc_col]
+            if project_id in project_df[acc_col].unique():
+                search_df.at[i, label_col] = project_df[project_df[acc_col] == project_id][label_col].squeeze()
                 
     return search_df, search_pub_df
             
@@ -201,7 +200,7 @@ def get_grid_options(df, starting_page, selected_row_index):
     builder = GridOptionsBuilder.from_dataframe(df[aggrid_columns])
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
-    builder.configure_column(title_col, flex=3.5)
+    builder.configure_column(title_col, flex=3)
     builder.configure_column(label_col, flex=1)
     builder.configure_selection() # Required for interactive selection
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
@@ -328,7 +327,7 @@ def update_labels(tab, df, pub_df=None):
             
     st.session_state[tab + "_new"] = ""
 
-def display_annotation_feature(tab, df, pub_df=None):
+def display_annotation_feature(tab, df, pub_df=None, allow_new=True):
     st.header("Annotate")
     
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
@@ -346,37 +345,19 @@ def display_annotation_feature(tab, df, pub_df=None):
 
     with st.form(key=(tab + "_annotation_form")):
         st.write(f"Edit {project_id} labels:")
-        if label_options:
+        if label_options and allow_new:
             col1, col2 = st.columns(2)
             with col1:
                 labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key=(tab + "_labels"))
             with col2:
                 new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+        elif label_options:
+            labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key=(tab + "_labels"))
         else:
             labels = ""
             new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
             
-        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df))
- 
-def check_dataset(message):
-    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
-    label_sums = np.sum(y_labelled, axis=0)
-    project_sum = np.sum(y_labelled, axis=1)
-    labelled_projects = len(project_sum[project_sum > 0]) 
-    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
-
-    if labelled_projects < PROJECT_THRESHOLD:
-        message.write(f"So far {labelled_projects} projects have been annotated. For the algorithm to work well please find at least {PROJECT_THRESHOLD - labelled_projects} more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
-        return None, None
-    elif len(rare_labels) > 0:
-        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as any of the following: {', '.join([index_to_label[i] for i in rare_labels])}. Use the Search tab to search the BioProject database directly if the annotation dataset is insufficient.")
-        return None, None
-    else:
-        message.write("Ready to predict. You will be asked for some more annotations as the algorithm is running.")
-        labelled_project_df = project_df.loc[project_df[label_col] is not None]
-        X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
-        return X_labelled, y_labelled
-        
+        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df)) 
         
  
 st.title("BioProject Annotation")
@@ -410,7 +391,7 @@ with annotate_tab:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
 
 with search_tab:
-    st.header("Search BioProject for more projects")
+    st.header("Search BioProject")
     tab_2 = "Search"
     
     api_terms = display_search_feature(tab_2)
@@ -422,21 +403,58 @@ with search_tab:
             display_annotation_feature(tab_2, api_project_df, api_pub_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
-        
+  
+@st.cache_resource
+def get_active_learning_df(iteration):
+    return pd.DataFrame(X_unlabelled[to_label])
+    
+def check_dataset():
+    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
+    label_sums = np.sum(y_labelled, axis=0)
+    project_sum = np.sum(y_labelled, axis=1)
+    labelled_projects = len(project_sum[project_sum > 0]) 
+    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
+
+    if labelled_projects < PROJECT_THRESHOLD:
+        message.write(f"So far {labelled_projects} projects have been annotated. For the algorithm to work well please find at least {PROJECT_THRESHOLD - labelled_projects} more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
+        return None, None
+    elif len(rare_labels) > 0:
+        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as: {', '.join([index_to_label[i] for i in rare_labels])}.")
+        return None, None
+    else:
+        labelled_project_df = project_df.loc[project_df[label_col] is not None]
+        X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
+        return X_labelled, y_labelled
+  
 with predict_tab:
     st.header("Predict annotations")
+    tab_3 = "Predict"
+    iteration = st.session_state.get("iteration", 0)
+    
     message = st.empty()
-    start_button = st.button("Start")
+    btn = st.empty()
+    if iteration == 0:
+        start_button = btn.button("Start", key="start_button")
+    else:
+        done_button = btn.button("Done", key="done_button")
     st.write("")
     st.write("")
-        
-    # if start_button:
-        # X_labelled, y_labelled = check_dataset(message)
-        # if X_labelled and y_labelled:
-            # X_unlabelled, to_label, not_to_label = learn(X_labelled, y_labelled)
-            
-            # if to_label:
-                # learn_df = pd.DataFrame(X_unlabelled[to_label])
+    
+    
+    X_labelled, y_labelled = None, None    
+    if iteration == 0 and start_button:
+        X_labelled, y_labelled = check_dataset()
+        if X_labelled and y_labelled:
+            X_unlabelled, to_label, not_to_label = learn(X_labelled, y_labelled)
+
+            if to_label:
+                message.write("Prediction algorithm in progress.Fully annotate all the projects below before pressing Done:")
+                btn.empty()
+                done_button = btn.button("Done", key="done_button")
+
+            learn_df = get_active_learning_df(iteration)
+            display_interactive_grid(tab_3, learn_df)
+            display_annotation_feature(tab_3, learn_df, allow_new=False)
         # new_labels = None
         
         # y_labelled = np.vstack((y_labelled, new_labels))
