@@ -9,7 +9,7 @@ from streamlit.components.v1 import html
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
-from active_learning import get_label_matrix, get_sample_matrix
+from active_learning import predict
 
 st.set_page_config(page_title="BioProject Annotation")
 
@@ -51,6 +51,7 @@ pub_columns = [pmid_col, pubtitle_col, abstract_col, mesh_col, key_col]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
+checking_msg = "Checking dataset..."
 
 primary_colour = "#81b1cc"
 aggrid_css = {
@@ -145,6 +146,7 @@ def display_search_feature(tab):
     
     if st.session_state.get(tab + "_prev_search", "") != search:
         st.session_state[tab + "_selected_row_index"] = 0
+        st.session_state[tab + "_selected_projects"] = []
     st.session_state[tab + "_prev_search"] = search
     
     return search
@@ -180,7 +182,7 @@ def hide_details(tab):
     st.session_state[tab + "_project_details_hidden"] = True
 
 @st.cache_data(show_spinner=False)
-def get_grid_options(df, starting_page, selected_row_index):
+def get_grid_options(df, starting_page, selected_row_index, selection_mode="single"):
     options_dict = {
         "enableCellTextSelection" : True,
         "onFirstDataRendered" : JsCode("""
@@ -188,21 +190,23 @@ def get_grid_options(df, starting_page, selected_row_index):
                 params.api.paginationGoToPage(""" + str(starting_page) + """);
             }
         """),
-        "getRowStyle" : JsCode("""
+    }
+    
+    if selection_mode == "single":
+        options_dict["getRowStyle"] = JsCode("""
             function(params) {
                 if (params.rowIndex == """ + str(selected_row_index) + """) {
                     return {'background-color': '""" + primary_colour + """', 'color': 'black'};
                 }
             }
         """)
-    }
     
     builder = GridOptionsBuilder.from_dataframe(df[aggrid_columns])
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
     builder.configure_column(title_col, flex=3)
     builder.configure_column(label_col, flex=1)
-    builder.configure_selection() # Required for interactive selection
+    builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
     builder.configure_grid_options(**options_dict)
     builder.configure_side_bar()
@@ -210,18 +214,18 @@ def get_grid_options(df, starting_page, selected_row_index):
     grid_options = builder.build()
     return grid_options
     
-def display_interactive_grid(tab, df):
+def display_interactive_grid(tab, df, selection_mode="single"):
     rerun = st.session_state.get(tab + "_rerun", 0)
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     starting_page = selected_row_index // results_per_page
 
-    grid_options = get_grid_options(df, starting_page, selected_row_index)
+    grid_options = get_grid_options(df, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
         df[aggrid_columns], 
         gridOptions=grid_options,
         width="100%",
         theme="alpine",
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        update_mode=(GridUpdateMode.SELECTION_CHANGED if selection_mode=="single" else GridUpdateMode.NO_UPDATE),
         custom_css=aggrid_css,
         allow_unsafe_jscode=True,
         reload_data=False,
@@ -250,6 +254,7 @@ def display_interactive_grid(tab, df):
         
         selected_row_index = selected_data.index.tolist()[0]
         st.session_state[tab + "_selected_row_index"] = selected_row_index
+        st.session_state[tab + "_selected_projects"] = st.session_state.get(tab + "_selected_projects", []) + [df.iloc[selected_row_index][acc_col]]
         st.session_state[tab + "_rerun"] = 1
         
         st.experimental_rerun()    
@@ -359,6 +364,83 @@ def display_annotation_feature(tab, df, pub_df=None, allow_new=True):
             
         st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df)) 
         
+
+def display_add_to_dataset_feature(tab, df):
+    st.header("Add to dataset")
+    col1, col2, col3 = st.columns(3)
+    
+    # with col1:
+        # add_selection = st.button("Add selection")
+    # with col2:
+        # st.write("or")
+    # with col3:
+        # add_all = st.button("Add all")
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
+    selected_projects = st.session_state.get(tab + "_selected_projects", [])
+    
+    with st.form(key=(tab + "_add_form")):
+        add_selection = st.multiselect("Add selection:", df[acc_col], default=selected_projects, key=(tab + "_add_selection"))
+        
+        st.form_submit_button("Add", args=(add_selection,))
+        
+        
+@st.cache_resource(show_spinner=checking_msg)
+def get_label_matrix(project_df):
+    labels = set()
+    for annotation in project_df[label_col]:
+        if annotation is not None:
+            labels.update(set(annotation.split(DELIMITER)))
+    
+    i = 0
+    label_to_index = {}
+    index_to_label = {}
+    for label in labels:
+        label_to_index[label] = i
+        index_to_label[i] = label
+        i += 1
+    
+    y_labelled = np.zeros((len(project_df), len(labels)))
+    for i, annotation in enumerate(project_df[label_col]):
+        if annotation is not None:
+            for label in annotation.split(DELIMITER):
+                y_labelled[i, label_to_index[label]] = 1
+            
+    return y_labelled, label_to_index, index_to_label
+ 
+@st.cache_resource(show_spinner=checking_msg) 
+def get_sample_matrix(project_df, pub_df):
+    X_labelled = []
+    for project in project_df:
+        text = project_df[text_columns].str.join(" ")
+        if project[pub_col]:
+            for pmid in project[pub_col].split(DELIMITER):
+                text += " " + pub_df.loc[pub_df[pmid_col] == pmid].str.join(" ")
+        X_labelled.append(text)
+    return X_labelled
+    
+def check_dataset(project_df):
+    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df)
+    label_sums = np.sum(y_labelled, axis=0)
+    project_sum = np.sum(y_labelled, axis=1)
+    labelled_projects = len(project_sum[project_sum > 0]) 
+    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
+
+    if labelled_projects == len(project_df):
+        message.write("All projects in the dataset have been manually annotated. Use the **Search** tab to find and add unannotated projects.")
+    elif labelled_projects < PROJECT_THRESHOLD:
+        message.write(f"So far **{labelled_projects} projects** have been annotated. For the algorithm to work well please find at least **{PROJECT_THRESHOLD - labelled_projects}** more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
+    elif len(rare_labels) > 0:
+        message.write(f"Some labels have less than **{LABEL_THRESHOLD} samples**. For the algorithm to work well please find more projects to label as: **{', '.join([index_to_label[i] for i in rare_labels])}**.")
+    else:
+        labelled_df = project_df.loc[project_df[label_col] is not None]
+        unlabelled_df = project_df.loc[project_df[label_col] is None]
+        X_labelled = get_sample_matrix(labelled_df, pub_df)
+        X_unlabelled = get_sample_matrix(unlabelled_df, pub_df)
+        return X_labelled, y_labelled, X_unlabelled
+        
+    return None, None, None
+ 
  
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(["Annotate", "Search", "Predict"])
@@ -389,6 +471,7 @@ with annotate_tab:
         
     else:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
+    
 
 with search_tab:
     st.header("Search BioProject")
@@ -400,67 +483,36 @@ with search_tab:
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(tab_2, api_project_df)
-            display_annotation_feature(tab_2, api_project_df, api_pub_df)
+            display_add_to_dataset_feature(tab_2, api_project_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
-  
-@st.cache_resource
-def get_active_learning_df(iteration):
-    return pd.DataFrame(X_unlabelled[to_label])
-    
-def check_dataset():
-    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df, label_col, DELIMITER)
-    label_sums = np.sum(y_labelled, axis=0)
-    project_sum = np.sum(y_labelled, axis=1)
-    labelled_projects = len(project_sum[project_sum > 0]) 
-    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
-
-    if labelled_projects < PROJECT_THRESHOLD:
-        message.write(f"So far {labelled_projects} projects have been annotated. For the algorithm to work well please find at least {PROJECT_THRESHOLD - labelled_projects} more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
-        return None, None
-    elif len(rare_labels) > 0:
-        message.write(f"Some labels have less than {LABEL_THRESHOLD} samples. For the algorithm to work well please find more projects to label as: {', '.join([index_to_label[i] for i in rare_labels])}.")
-        return None, None
-    else:
-        labelled_project_df = project_df.loc[project_df[label_col] is not None]
-        X_labelled = get_sample_matrix(labelled_project_df, pub_df, text_columns, pub_col, pmid_col, DELIMITER)
-        return X_labelled, y_labelled
   
 with predict_tab:
     st.header("Predict annotations")
     tab_3 = "Predict"
-    iteration = st.session_state.get("iteration", 0)
     
     message = st.empty()
-    btn = st.empty()
-    if iteration == 0:
-        start_button = btn.button("Start", key="start_button")
-    else:
-        done_button = btn.button("Done", key="done_button")
+    start_button = btn.button("Start", key="start_button")
     st.write("")
     st.write("")
     
+    learn_df = None # Get from project_df the ones that are marked to label
     
-    X_labelled, y_labelled = None, None    
-    if iteration == 0 and start_button:
-        X_labelled, y_labelled = check_dataset()
-        if X_labelled and y_labelled:
-            X_unlabelled, to_label, not_to_label = learn(X_labelled, y_labelled)
-
+    X_labelled, y_labelled, X_unlabelled = None, None    
+    if start_button:
+        X_labelled, y_labelled, X_unlabelled = check_dataset()
+        if X_labelled:
+            y_predicted, y_probabilities, to_label = predict(X_labelled, y_labelled, X_unlabelled)
+            
+            # Display results
+            # Store results to new gsheet columns (predicted labels, metrics)
+            
             if to_label:
-                message.write("Prediction algorithm in progress.Fully annotate all the projects below before pressing Done:")
-                btn.empty()
-                done_button = btn.button("Done", key="done_button")
+                learn_df = X_unlabelled[to_label]
+                # Mark projects in gsheet last column
+                
 
-            learn_df = get_active_learning_df(iteration)
-            display_interactive_grid(tab_3, learn_df)
-            display_annotation_feature(tab_3, learn_df, allow_new=False)
-        # new_labels = None
-        
-        # y_labelled = np.vstack((y_labelled, new_labels))
-        # X_labelled = vstack((X_labelled, X_unlabelled[to_label]))
-        # X_unlabelled = X_unlabelled[not_to_label]
-
-        # clf.fit(X_labelled, y_labelled)
-        
-        # st.session_state.iteration = iteration + 1
+    if learn_df is not None and not learn_df.empty:
+        st.write("To improve prediction accuracy, consider annotating the following projects:")
+        display_interactive_grid(tab_3, learn_df)
+        display_annotation_feature(tab_3, learn_df, allow_new=False)
