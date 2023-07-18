@@ -13,6 +13,9 @@ from active_learning import predict
 
 st.set_page_config(page_title="BioProject Annotation")
 
+tab_names = ["Annotate", "Search", "Predict"]
+tab_1, tab_2, tab_3 = tab_names
+
 Entrez.email = "stell.aeva@hotmail.com"
 project_db = "bioproject"
 base_project_url = "https://www.ncbi.nlm.nih.gov/" + project_db + "/"
@@ -36,9 +39,11 @@ type_col = "Data_Type"
 scope_col = "Scope"
 org_col = "Organism"
 pub_col = "PMIDs"
-label_col = "Labels"
-project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, label_col]
-aggrid_columns = [acc_col, title_col, label_col]
+annot_col = "Annotation"
+predict_col = "Predicted_Labels"
+learn_col = "To_Label"
+project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
+aggrid_columns = [acc_col, title_col, annot_col]
 detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
 text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
 
@@ -111,8 +116,8 @@ def api_search(search_terms):
     all_project_data, all_pub_data = retrieve_projects(ids)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
-        search_df.columns = project_columns[:-1]
-        search_df[label_col] = None
+        search_df.columns = project_columns[:-3]
+        search_df[annot_col] = None
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
@@ -121,7 +126,7 @@ def api_search(search_terms):
         for i, row in search_df.iterrows():
             project_id = row[acc_col]
             if project_id in project_df[acc_col].unique():
-                search_df.at[i, label_col] = project_df[project_df[acc_col] == project_id][label_col].squeeze()
+                search_df.at[i, annot_col] = project_df[project_df[acc_col] == project_id][annot_col].item()
                 
     return search_df, search_pub_df
             
@@ -205,7 +210,7 @@ def get_grid_options(df, starting_page, selected_row_index, selection_mode="sing
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
     builder.configure_column(title_col, flex=3)
-    builder.configure_column(label_col, flex=1)
+    builder.configure_column(annot_col, flex=1)
     builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
     builder.configure_grid_options(**options_dict)
@@ -266,7 +271,15 @@ def display_interactive_grid(tab, df, selection_mode="single"):
 def update_annotation(project_id, labels):
     update = f"""
             UPDATE "{gsheet_url_proj}"
-            SET {label_col} = "{labels}"
+            SET {annot_col} = "{labels}"
+            WHERE {acc_col} = "{project_id}"
+            """
+    connection.execute(update)
+    
+def update_to_label(project_id, to_label):
+    update = f"""
+            UPDATE "{gsheet_url_proj}"
+            SET {learn_col} = {to_label}
             WHERE {acc_col} = "{project_id}"
             """
     connection.execute(update)
@@ -291,10 +304,9 @@ def insert_publication(values):
  
 def get_project_labels(project_id):
     if project_id in project_df[acc_col].unique():
-        project_labels = project_df[project_df[acc_col] == project_id][label_col].values[0]
+        project_labels = project_df[project_df[acc_col] == project_id][annot_col].values[0]
         if project_labels is not None:
             return project_labels.split(DELIMITER)
-            
     return []
         
  
@@ -313,12 +325,17 @@ def update_labels(tab, df, pub_df=None):
             update_annotation(project_id, updated_labels_str)
             
             if updated_labels_str:
-                project_df.loc[project_df[acc_col] == project_id, label_col] = updated_labels_str
+                project_df.loc[project_df[acc_col] == project_id, annot_col] = updated_labels_str
+                if project_df.loc[project_df[acc_col] == project_id, learn_col].item() == True:
+                    # TODO: Uncomment if we decide that annotated projects should go away immediately
+                    # update_to_label(project_id, False)
+                    # project_df.loc[project_df[acc_col] == project_id, learn_col] = False
+                    st.session_state[tab_3 + "_selected_row_index"] = 0
             else:
-                project_df.loc[project_df[acc_col] == project_id, label_col] = None
+                project_df.loc[project_df[acc_col] == project_id, annot_col] = None
     else:
-        # Global variable used so display actually changed
-        api_project_df.at[selected_row_index, label_col] = updated_labels_str
+        # Global variable used so that display is actually changed
+        api_project_df.at[selected_row_index, annot_col] = updated_labels_str
         project_values = df.iloc[selected_row_index]
         
         project_df.loc[len(project_df.index)] = project_values.tolist()
@@ -333,35 +350,35 @@ def update_labels(tab, df, pub_df=None):
     st.session_state[tab + "_new"] = ""
 
 def display_annotation_feature(tab, df, pub_df=None, allow_new=True):
-    st.header("Annotate")
-    
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     project_id = df.iloc[selected_row_index][acc_col]
     
     # TODO: May want to move this outside method
     label_options = set()
     if not project_df.empty:
-        for annotation in project_df[label_col]:
+        for annotation in project_df[annot_col]:
             if annotation is not None:
                 label_options.update(set(annotation.split(DELIMITER)))
         label_options = sorted(list(label_options))
     
+    
     original_labels = get_project_labels(project_id)
+    st.session_state[tab + "_labels"] = original_labels
 
     with st.form(key=(tab + "_annotation_form")):
-        st.write(f"Edit {project_id} labels:")
+        st.write(f"Edit **{project_id}** labels:")
         if label_options and allow_new:
             col1, col2 = st.columns(2)
             with col1:
-                labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key=(tab + "_labels"))
+                labels = st.multiselect("", label_options, label_visibility="collapsed", key=(tab + "_labels"))
             with col2:
                 new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
         elif label_options:
-            labels = st.multiselect("", label_options, default=original_labels, label_visibility="collapsed", key=(tab + "_labels"))
+            labels = st.multiselect("", label_options, label_visibility="collapsed", key=(tab + "_labels"))
         else:
             labels = ""
             new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
-            
+
         st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df)) 
         
 
@@ -388,7 +405,7 @@ def display_add_to_dataset_feature(tab, df):
 @st.cache_resource(show_spinner=checking_msg)
 def get_label_matrix(project_df):
     labels = set()
-    for annotation in project_df[label_col]:
+    for annotation in project_df[annot_col]:
         if annotation is not None:
             labels.update(set(annotation.split(DELIMITER)))
     
@@ -401,7 +418,7 @@ def get_label_matrix(project_df):
         i += 1
     
     y_labelled = np.zeros((len(project_df), len(labels)))
-    for i, annotation in enumerate(project_df[label_col]):
+    for i, annotation in enumerate(project_df[annot_col]):
         if annotation is not None:
             for label in annotation.split(DELIMITER):
                 y_labelled[i, label_to_index[label]] = 1
@@ -433,8 +450,8 @@ def check_dataset(project_df):
     elif len(rare_labels) > 0:
         message.write(f"Some labels have less than **{LABEL_THRESHOLD} samples**. For the algorithm to work well please find more projects to label as: **{', '.join([index_to_label[i] for i in rare_labels])}**.")
     else:
-        labelled_df = project_df.loc[project_df[label_col] is not None]
-        unlabelled_df = project_df.loc[project_df[label_col] is None]
+        labelled_df = project_df.loc[project_df[annot_col] is not None]
+        unlabelled_df = project_df.loc[project_df[annot_col] is None]
         X_labelled = get_sample_matrix(labelled_df, pub_df)
         X_unlabelled = get_sample_matrix(unlabelled_df, pub_df)
         return X_labelled, y_labelled, X_unlabelled
@@ -443,15 +460,14 @@ def check_dataset(project_df):
  
  
 st.title("BioProject Annotation")
-annotate_tab, search_tab, predict_tab = st.tabs(["Annotate", "Search", "Predict"])
+annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
 
 connection = connect_gsheets_api()
 project_df = load_data(gsheet_url_proj, project_columns)
 pub_df = load_data(gsheet_url_pub, pub_columns)
     
 with annotate_tab:
-    st.header("Find projects")
-    tab_1 = "Annotate"
+    st.header("Annotate projects")
     annotate_df = project_df
 
     if not project_df.empty:
@@ -475,7 +491,6 @@ with annotate_tab:
 
 with search_tab:
     st.header("Search BioProject")
-    tab_2 = "Search"
     
     api_terms = display_search_feature(tab_2)
     if api_terms:
@@ -489,16 +504,14 @@ with search_tab:
   
 with predict_tab:
     st.header("Predict annotations")
-    tab_3 = "Predict"
     
     message = st.empty()
-    start_button = btn.button("Start", key="start_button")
+    start_button = st.button("Start", key="start_button")
     st.write("")
     st.write("")
     
-    learn_df = None # Get from project_df the ones that are marked to label
+    learn_df = project_df[project_df[learn_col] == True]
     
-    X_labelled, y_labelled, X_unlabelled = None, None    
     if start_button:
         X_labelled, y_labelled, X_unlabelled = check_dataset()
         if X_labelled:
@@ -508,11 +521,20 @@ with predict_tab:
             # Store results to new gsheet columns (predicted labels, metrics)
             
             if to_label:
-                learn_df = X_unlabelled[to_label]
-                # Mark projects in gsheet last column
+                # Mark previous projects as no longer requiring label
+                for project_id in learn_df[acc_col].unique():
+                    update_to_label(project_id, False)
+                    project_df.loc[project_df[acc_col] == project_id, learn_col] = False
                 
-
+                # Mark new projects as requiring label                
+                learn_df = X_unlabelled[to_label]
+                for project_id in learn_df[acc_col].unique():
+                    update_to_label(project_id, True)
+                    project_df.loc[project_df[acc_col] == project_id, learn_col] = True
+                
     if learn_df is not None and not learn_df.empty:
+        st.header("Improve predictions")
         st.write("To improve prediction accuracy, consider annotating the following projects:")
+        learn_df = learn_df.sort_index(axis=0, ignore_index=True) # Resets index to 0, 1, 2...
         display_interactive_grid(tab_3, learn_df)
-        display_annotation_feature(tab_3, learn_df, allow_new=False)
+        display_annotation_feature(tab_3, learn_df)
