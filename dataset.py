@@ -35,8 +35,7 @@ def store_data(gsheet_url, entries):
     columns = list(entries[0].keys())
     values = []
     for entry in entries:
-        entry_vals = ["'" + str(val) if str(val).isnumeric() else val for val in entry_vals]
-        entry_str = '("' + '", "'.join([val for val in entry_vals]) + '")'
+        entry_str = '("' + '", "'.join([entry[col] for col in columns]) + '")'
         values.append(entry_str)
         
     for batch in range(0, len(values), api_calls_pm_google):
@@ -128,18 +127,18 @@ def get_project_data(project):
     target = project_type.get("Target", [{}])[0]
     publications = project_descr.get("Publication", [])
     
-    project_data["uid"] = archive.get("id", "")
-    project_data["acc"] = archive.get("accession", "")
+    project_data["UID"] = archive.get("id", "")
+    project_data["Accession"] = archive.get("accession", "")
     
-    project_data["title"] = project_descr.get("Title", "")
-    project_data["name"] = project_descr.get("Name", "")
-    project_data["description"] = project_descr.get("Description", "")
+    project_data["Title"] = project_descr.get("Title", "")
+    project_data["Name"] = project_descr.get("Name", "")
+    project_data["Description"] = project_descr.get("Description", "")
     
-    project_data["datatype"] = project_type.get("ProjectDataTypeSet", [{}])[0].get("DataType", "")
-    project_data["scope"] = target.get("attrs", {}).get("sample_scope", "")
-    if project_data["scope"]:
-        project_data["scope"] = project_data["scope"][1:]
-    project_data["organism"] = target.get("Organism", [{}])[0].get("OrganismName", "") 
+    project_data["Data_Type"] = project_type.get("ProjectDataTypeSet", [{}])[0].get("DataType", "")
+    project_data["Scope"] = target.get("attrs", {}).get("sample_scope", "")
+    if project_data["Scope"]:
+        project_data["Scope"] = project_data["Scope"][1:]
+    project_data["Organism"] = target.get("Organism", [{}])[0].get("OrganismName", "") 
     
     pub_list = []
     for pub in publications:
@@ -147,7 +146,7 @@ def get_project_data(project):
             pub_id = pub["attrs"]["id"].strip()
             if pub_id.isnumeric():
                 pub_list.append(pub_id)
-    project_data["publications"] = delimiter.join(pub_list)
+    project_data["PMIDs"] = delimiter.join(pub_list)
     
     project_data = clean_text(project_data)
     return project_data
@@ -157,8 +156,8 @@ def get_publication_data(pub):
     pub_data = {}
     article = pub.get("Article", [{}])[0]
     
-    pub_data["pmid"] = pub.get("PMID", [{}])[0].get("text", "")
-    pub_data["title"] = article.get("ArticleTitle", "")
+    pub_data["PMID"] = pub.get("PMID", [{}])[0].get("text", "")
+    pub_data["Title"] = article.get("ArticleTitle", "")
     
     clean = []
     pieces = article.get("Abstract", [{}])[0].get("AbstractText", [])
@@ -170,7 +169,7 @@ def get_publication_data(pub):
                 clean.append(piece.strip())
             elif isinstance(piece, dict) and "text" in piece:
                 clean.append(piece["text"].strip())
-    pub_data["abstract"] = " ".join(clean)
+    pub_data["Abstract"] = " ".join(clean)
     
     mesh_section = pub.get("MeshHeadingList", [{}])[0].get("MeshHeading", [])
     mesh_list = []
@@ -181,11 +180,11 @@ def get_publication_data(pub):
             mesh_list.append(name.strip())
         if qualifier:
             mesh_list.append(qualifier.strip())
-    pub_data["mesh"] = delimiter.join(mesh_list)
+    pub_data["MeSH"] = delimiter.join(mesh_list)
             
     key_section = pub.get("KeywordList", [{}])[0].get("Keyword", [])
     keyword_list = [keyword["text"].strip() for keyword in key_section if "text" in keyword]
-    pub_data["keywords"] = delimiter.join(keyword_list)
+    pub_data["Keywords"] = delimiter.join(keyword_list)
     
     pub_data = clean_text(pub_data)
     return pub_data
@@ -204,7 +203,7 @@ def retrieve_projects(ids):
                     project_data = get_project_data(project["Project"][0])
                     all_project_data.append(project_data)
                     
-                    pub_ids = project_data["publications"]
+                    pub_ids = project_data["PMIDs"]
                     if pub_ids:
                         pub_ids = ",".join(pub_ids.split(delimiter))
                         pub_dict = efetch(pub_db, pub_ids)
