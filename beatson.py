@@ -280,7 +280,7 @@ def update_annotation(project_id, annotation):
 def update_to_label(project_id, to_label):
     update = f"""
             UPDATE "{gsheet_url_proj}"
-            SET {learn_col} = {to_label}
+            SET {learn_col} = "{to_label}"
             WHERE {acc_col} = "{project_id}"
             """
     connection.execute(update)
@@ -533,25 +533,23 @@ with predict_tab:
                 unlabelled_df = project_df[project_df[annot_col].isnull()]
                 labels = np.array(labels)
                 for i, project_id in enumerate(unlabelled_df[acc_col]):
-                    if project_id != "PRJNA989559":
-                        predicted_mask = np.where(y_predicted[i] > 0, True, False)
-                        predicted_str = DELIMITER.join(labels[predicted_mask])
-                        # This takes way too long
-                        print(project_id)
-                        update_predicted(project_id, predicted_str)
-                        project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
-                        unlabelled_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+                    predicted_mask = np.where(y_predicted[i] > 0, True, False)
+                    predicted_str = DELIMITER.join(labels[predicted_mask])
+                    # TODO: Takes way too long, make async?
+                    update_predicted(project_id, predicted_str)
+                    unlabelled_df.at[i, predict_col] = predicted_str
+                    project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
                     
                 if to_label.tolist():
                     # Mark previous projects as no longer requiring label
                     for project_id in learn_df[acc_col].unique():
-                        update_to_label(project_id, False)
+                        update_to_label(project_id, "0")
                         project_df.loc[project_df[acc_col] == project_id, learn_col] = False
                     
-                    # Mark new projects as requiring label                
-                    learn_df = X_unlabelled[to_label]
+                    # Mark new projects as requiring label
+                    learn_df = unlabelled_df.iloc[to_label.tolist(), :]
                     for project_id in learn_df[acc_col].unique():
-                        update_to_label(project_id, True)
+                        update_to_label(project_id, "1")
                         project_df.loc[project_df[acc_col] == project_id, learn_col] = True
                 
             st.write("Predicted labels:")
