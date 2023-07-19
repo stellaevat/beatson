@@ -44,6 +44,7 @@ predict_col = "Predicted_Labels"
 learn_col = "To_Label"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
 aggrid_columns = [acc_col, title_col, annot_col]
+aggrid_prediction_columns = [acc_col, title_col, predict_col]
 detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
 text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
 
@@ -96,6 +97,20 @@ def load_data(gsheet_url, _columns):
     if not df.empty:
         df.columns = _columns
     return df
+    
+def get_columns():
+    query = f'SELECT * FROM pragma_table_info("{gsheet_url_proj}")'
+    executed_query = connection.execute(query)
+    df = pd.DataFrame(executed_query.fetchall())
+    st.write(df)
+    # for i, col in enumerate(project_columns):
+        # change = f'''ALTER TABLE "{gsheet_url_proj}"
+            # RENAME COLUMN "{i}" TO "{col}"'''
+        # connection.execute(change)
+    # query = f'SELECT * FROM pragma_table_info("{gsheet_url_proj}")'
+    # executed_query = connection.execute(query)
+    # df_2 = pd.DataFrame(executed_query.fetchall())
+    # st.write(df_2)
     
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
@@ -187,7 +202,7 @@ def hide_details(tab):
     st.session_state[tab + "_project_details_hidden"] = True
 
 @st.cache_data(show_spinner=False)
-def get_grid_options(df, starting_page, selected_row_index, selection_mode="single"):
+def get_grid_options(df, columns, starting_page, selected_row_index, selection_mode="single"):
     options_dict = {
         "enableCellTextSelection" : True,
         "onFirstDataRendered" : JsCode("""
@@ -206,7 +221,7 @@ def get_grid_options(df, starting_page, selected_row_index, selection_mode="sing
             }
         """)
     
-    builder = GridOptionsBuilder.from_dataframe(df[aggrid_columns])
+    builder = GridOptionsBuilder.from_dataframe(df[columns])
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
     builder.configure_column(title_col, flex=3)
@@ -219,14 +234,14 @@ def get_grid_options(df, starting_page, selected_row_index, selection_mode="sing
     grid_options = builder.build()
     return grid_options
     
-def display_interactive_grid(tab, df, selection_mode="single"):
+def display_interactive_grid(tab, df, columns, selection_mode="single"):
     rerun = st.session_state.get(tab + "_rerun", 0)
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     starting_page = selected_row_index // results_per_page
 
-    grid_options = get_grid_options(df, starting_page, selected_row_index, selection_mode)
+    grid_options = get_grid_options(df, columns, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
-        df[aggrid_columns], 
+        df[columns], 
         gridOptions=grid_options,
         width="100%",
         theme="alpine",
@@ -268,10 +283,10 @@ def display_interactive_grid(tab, df, selection_mode="single"):
             display_project_details(df.iloc[selected_row_index])
 
 
-def update_annotation(project_id, labels):
+def update_annotation(project_id, annotation):
     update = f"""
             UPDATE "{gsheet_url_proj}"
-            SET {annot_col} = "{labels}"
+            SET {annot_col} = "{annotation}"
             WHERE {acc_col} = "{project_id}"
             """
     connection.execute(update)
@@ -284,8 +299,15 @@ def update_to_label(project_id, to_label):
             """
     connection.execute(update)
     
+def update_predicted(project_id, predicted):
+    update = f"""
+            UPDATE "{gsheet_url_proj}"
+            SET {predict_col} = "{predicted}"
+            WHERE {acc_col} = "{project_id}"
+            """
+    connection.execute(update)
+    
 def insert_annotation(values):
-    values = ["'" + str(val) if str(val).isnumeric() else val for val in values]
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
     insert = f''' 
             INSERT INTO "{gsheet_url_proj}" ({", ".join(project_columns)})
@@ -294,7 +316,6 @@ def insert_annotation(values):
     connection.execute(insert)
     
 def insert_publication(values):
-    values = ["'" + str(val) if str(val).isnumeric() else val for val in values]
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
     insert = f''' 
             INSERT INTO "{gsheet_url_pub}" ({", ".join(pub_columns)})
@@ -338,7 +359,7 @@ def update_labels(tab, df, pub_df=None):
         api_project_df.at[selected_row_index, annot_col] = updated_labels_str
         project_values = df.iloc[selected_row_index]
         
-        project_df.loc[len(project_df.index)] = project_values.tolist()
+        project_df.loc[len(project_df.index)] = project_values.tolist() + [None, None]
         insert_annotation(project_values.tolist())
         
         if pub_df is not None and project_values[pub_col] is not None:
@@ -403,9 +424,9 @@ def display_add_to_dataset_feature(tab, df):
         
         
 @st.cache_resource(show_spinner=checking_msg)
-def get_label_matrix(project_df):
+def get_label_matrix(df):
     labels = set()
-    for annotation in project_df[annot_col]:
+    for annotation in df[annot_col]:
         if annotation is not None:
             labels.update(set(annotation.split(DELIMITER)))
     
@@ -417,8 +438,8 @@ def get_label_matrix(project_df):
         index_to_label[i] = label
         i += 1
     
-    y_labelled = np.zeros((len(project_df), len(labels)))
-    for i, annotation in enumerate(project_df[annot_col]):
+    y_labelled = np.zeros((len(df), len(labels)))
+    for i, annotation in enumerate(df[annot_col]):
         if annotation is not None:
             for label in annotation.split(DELIMITER):
                 y_labelled[i, label_to_index[label]] = 1
@@ -426,18 +447,21 @@ def get_label_matrix(project_df):
     return y_labelled, label_to_index, index_to_label
  
 @st.cache_resource(show_spinner=checking_msg) 
-def get_sample_matrix(project_df, pub_df):
+def get_sample_matrix(df, pub_df):
     X_labelled = []
-    for project in project_df:
-        text = project_df[text_columns].str.join(" ")
+    for i, project in df.iterrows():
+        text = " ".join([field for field in project[text_columns] if field is not None])
         if project[pub_col]:
             for pmid in project[pub_col].split(DELIMITER):
-                text += " " + pub_df.loc[pub_df[pmid_col] == pmid].str.join(" ")
+                text += " " + " ".join([field for field in pub_df.loc[pub_df[pmid_col] == pmid].iloc[0] if field is not None])
         X_labelled.append(text)
     return X_labelled
     
-def check_dataset(project_df):
-    y_labelled, label_to_index, index_to_label = get_label_matrix(project_df)
+def check_dataset():
+    unlabelled_df = project_df[project_df[annot_col].isnull()]
+    labelled_df = project_df[project_df[annot_col].notnull()]
+    y_labelled, label_to_index, index_to_label = get_label_matrix(labelled_df)
+    
     label_sums = np.sum(y_labelled, axis=0)
     project_sum = np.sum(y_labelled, axis=1)
     labelled_projects = len(project_sum[project_sum > 0]) 
@@ -450,13 +474,12 @@ def check_dataset(project_df):
     elif len(rare_labels) > 0:
         message.write(f"Some labels have less than **{LABEL_THRESHOLD} samples**. For the algorithm to work well please find more projects to label as: **{', '.join([index_to_label[i] for i in rare_labels])}**.")
     else:
-        labelled_df = project_df.loc[project_df[annot_col] is not None]
-        unlabelled_df = project_df.loc[project_df[annot_col] is None]
         X_labelled = get_sample_matrix(labelled_df, pub_df)
         X_unlabelled = get_sample_matrix(unlabelled_df, pub_df)
-        return X_labelled, y_labelled, X_unlabelled
+        labels = sorted(list(label_to_index.keys()), key=lambda x: label_to_index[x])
+        return X_labelled, X_unlabelled, y_labelled, labels
         
-    return None, None, None
+    return None, None, None, None
  
  
 st.title("BioProject Annotation")
@@ -482,7 +505,7 @@ with annotate_tab:
                 st.write(f"No results for '{search_terms}'. All projects:")
         
         if not annotate_df.empty:
-            display_interactive_grid(tab_1, annotate_df)
+            display_interactive_grid(tab_1, annotate_df, aggrid_columns)
             display_annotation_feature(tab_1, annotate_df)
         
     else:
@@ -497,8 +520,9 @@ with search_tab:
         api_project_df, api_pub_df = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
-            display_interactive_grid(tab_2, api_project_df)
-            display_add_to_dataset_feature(tab_2, api_project_df)
+            display_interactive_grid(tab_2, api_project_df, aggrid_columns)
+            # display_add_to_dataset_feature(tab_2, api_project_df)
+            display_annotation_feature(tab_2, api_project_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
@@ -513,28 +537,44 @@ with predict_tab:
     learn_df = project_df[project_df[learn_col] == True]
     
     if start_button:
-        X_labelled, y_labelled, X_unlabelled = check_dataset()
+        X_labelled, X_unlabelled, y_labelled, labels = check_dataset()
         if X_labelled:
             y_predicted, y_probabilities, to_label = predict(X_labelled, y_labelled, X_unlabelled)
             
-            # Display results
-            # Store results to new gsheet columns (predicted labels, metrics)
-            
-            if to_label:
-                # Mark previous projects as no longer requiring label
-                for project_id in learn_df[acc_col].unique():
-                    update_to_label(project_id, False)
-                    project_df.loc[project_df[acc_col] == project_id, learn_col] = False
+            # TODO: Deal with metrics too
+            with st.spinner("Processing predictions..."):
+                unlabelled_df = project_df[project_df[annot_col].isnull()]
+                labels = np.array(labels)
+                for i, project_id in enumerate(unlabelled_df[acc_col]):
+                    if project_id != "PRJNA989559":
+                        predicted_mask = np.where(y_predicted[i] > 0, True, False)
+                        predicted_str = DELIMITER.join(labels[predicted_mask])
+                        # This takes way too long
+                        print(project_id)
+                        update_predicted(project_id, predicted_str)
+                        project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+                        unlabelled_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+                    
+                if to_label.tolist():
+                    # Mark previous projects as no longer requiring label
+                    for project_id in learn_df[acc_col].unique():
+                        update_to_label(project_id, False)
+                        project_df.loc[project_df[acc_col] == project_id, learn_col] = False
+                    
+                    # Mark new projects as requiring label                
+                    learn_df = X_unlabelled[to_label]
+                    for project_id in learn_df[acc_col].unique():
+                        update_to_label(project_id, True)
+                        project_df.loc[project_df[acc_col] == project_id, learn_col] = True
                 
-                # Mark new projects as requiring label                
-                learn_df = X_unlabelled[to_label]
-                for project_id in learn_df[acc_col].unique():
-                    update_to_label(project_id, True)
-                    project_df.loc[project_df[acc_col] == project_id, learn_col] = True
+            st.write("Predicted labels:")
+            display_interactive_grid(tab_3, unlabelled_df, aggrid_prediction_columns)
                 
     if learn_df is not None and not learn_df.empty:
         st.header("Improve predictions")
         st.write("To improve prediction accuracy, consider annotating the following projects:")
         learn_df = learn_df.sort_index(axis=0, ignore_index=True) # Resets index to 0, 1, 2...
-        display_interactive_grid(tab_3, learn_df)
-        display_annotation_feature(tab_3, learn_df)
+        display_interactive_grid("Suggestions", learn_df, aggrid_columns)
+        display_annotation_feature("Suggestions", learn_df)
+        
+    st.button("Get", key="get", on_click=get_columns)

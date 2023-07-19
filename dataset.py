@@ -33,6 +33,7 @@ def connect_gsheets_api():
 
 def store_data(gsheet_url, entries):
     columns = list(entries[0].keys())
+    print(columns)
     values = []
     for entry in entries:
         entry_str = '("' + '", "'.join([entry[col] for col in columns]) + '")'

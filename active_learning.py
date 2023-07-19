@@ -40,7 +40,7 @@ def get_vectorizer():
 # MMC Algorithm
 
 @st.cache_data(show_spinner=False)
-def mmc_label_prediction(X_labelled, y_labelled, X_unlabelled):
+def mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled):
     # Training data for label-number (n) prediction
     y_probability = clf.predict_proba(X_labelled)
     y_normalized = (y_probability.T / np.sum(y_probability, axis=1)).T
@@ -74,9 +74,9 @@ def mmc_label_prediction(X_labelled, y_labelled, X_unlabelled):
     return y_predicted
 
 @st.cache_data(show_spinner=False)
-def mmc_query_selection(X_labelled, y_labelled, X_unlabelled):
+def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
-    y_predicted = mmc_label_prediction(X_labelled, y_labelled, X_unlabelled)
+    y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
     to_label = expected_loss_reduction_score[:SELECTION]
@@ -84,8 +84,7 @@ def mmc_query_selection(X_labelled, y_labelled, X_unlabelled):
   
 # Simplified MMC Algorithm 
 
-@st.cache_data(show_spinner=False) 
-def mmc_simplified_query_selection(X_unlabelled):
+def mmc_simplified_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     y_predicted = clf.predict(X_unlabelled)
     y_predicted[y_predicted < 1] = -1
@@ -96,8 +95,7 @@ def mmc_simplified_query_selection(X_unlabelled):
   
 # BinMin Algorithm
 
-@st.cache_data(show_spinner=False)
-def binmin_query_selection(X_unlabelled):
+def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
     to_label = most_uncertain_label_score[:SELECTION]
@@ -108,7 +106,7 @@ def binmin_query_selection(X_unlabelled):
 # Prediction
 
 @st.cache_data(show_spinner=predict_msg)
-def predict(X_labelled, y_labelled, X_unlaballed):
+def predict(X_labelled, y_labelled, X_unlabelled):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
     X_unlabelled = vectorizer.transform(X_unlabelled)
@@ -116,9 +114,9 @@ def predict(X_labelled, y_labelled, X_unlaballed):
     clf = get_classifier()
     clf.fit(X_labelled, y_labelled)
     
-    to_label = binmin_query_selection(X_unlabelled)
+    to_label = mmc_simplified_query_selection(clf, X_unlabelled)
     y_predicted = clf.predict(X_unlabelled)
     y_probabilities = None
-    
+
     return y_predicted, y_probabilities, to_label
     
