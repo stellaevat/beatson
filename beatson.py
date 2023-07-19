@@ -77,7 +77,7 @@ streamlit_css = r'''
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
     
-@st.cache_resource(show_spinner=loading_msg)
+# @st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
     connection = connect(
         ":memory:",
@@ -97,20 +97,6 @@ def load_data(gsheet_url, _columns):
     if not df.empty:
         df.columns = _columns
     return df
-    
-def get_columns():
-    query = f'SELECT * FROM pragma_table_info("{gsheet_url_proj}")'
-    executed_query = connection.execute(query)
-    df = pd.DataFrame(executed_query.fetchall())
-    st.write(df)
-    # for i, col in enumerate(project_columns):
-        # change = f'''ALTER TABLE "{gsheet_url_proj}"
-            # RENAME COLUMN "{i}" TO "{col}"'''
-        # connection.execute(change)
-    # query = f'SELECT * FROM pragma_table_info("{gsheet_url_proj}")'
-    # executed_query = connection.execute(query)
-    # df_2 = pd.DataFrame(executed_query.fetchall())
-    # st.write(df_2)
     
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
@@ -357,10 +343,11 @@ def update_labels(tab, df, pub_df=None):
     else:
         # Global variable used so that display is actually changed
         api_project_df.at[selected_row_index, annot_col] = updated_labels_str
-        project_values = df.iloc[selected_row_index]
+        project_values = df.iloc[selected_row_index].tolist()
+        project_values += ['' for i in range(len(project_columns) - len(project_values))]
         
-        project_df.loc[len(project_df.index)] = project_values.tolist() + [None, None]
-        insert_annotation(project_values.tolist())
+        project_df.loc[len(project_df.index)] = project_values
+        insert_annotation(project_values)
         
         if pub_df is not None and project_values[pub_col] is not None:
             for pmid in project_values[pub_col].split(DELIMITER):
@@ -576,5 +563,3 @@ with predict_tab:
         learn_df = learn_df.sort_index(axis=0, ignore_index=True) # Resets index to 0, 1, 2...
         display_interactive_grid("Suggestions", learn_df, aggrid_columns)
         display_annotation_feature("Suggestions", learn_df)
-        
-    st.button("Get", key="get", on_click=get_columns)

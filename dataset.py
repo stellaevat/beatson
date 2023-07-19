@@ -33,7 +33,6 @@ def connect_gsheets_api():
 
 def store_data(gsheet_url, entries):
     columns = list(entries[0].keys())
-    print(columns)
     values = []
     for entry in entries:
         entry_str = '("' + '", "'.join([entry[col] for col in columns]) + '")'
@@ -225,7 +224,6 @@ def retrieve_projects(ids):
         print("No project ids given.")
     
     return all_project_data, all_pub_data
-        
 
 # connection = connect_gsheets_api()
 # ids = ""
