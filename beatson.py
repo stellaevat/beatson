@@ -228,7 +228,7 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
 
     grid_options = get_grid_options(df, columns, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
-        df[columns], 
+        df[columns].fillna(value=EMPTY_VALUE), 
         gridOptions=grid_options,
         width="100%",
         theme="alpine",
