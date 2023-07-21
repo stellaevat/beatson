@@ -310,13 +310,50 @@ def insert_publication(values):
             '''
     connection.execute(insert)
  
+ 
+def add_to_dataset(df, new_pub_df, project_ids=None):
+    if project_ids:
+        df = df[df[acc_col].isin(project_ids)]
+        
+    for i, project in pd.DataFrame(df).iterrows():
+        if project[acc_col] not in project_df[acc_col].unique():
+            project_values = project.tolist()
+            project_values += ['' for i in range(len(project_columns) - len(project_values))]
+            
+            project_df.loc[len(project_df.index)] = project_values
+            insert_annotation(project_values)
+            
+            publications = project[pub_col]
+            if publications and new_pub_df is not None:
+                for pmid in publications.split(DELIMITER):
+                    if pmid in new_pub_df[pmid_col].unique() and pmid not in pub_df[pmid_col].unique():
+                        pub_values = new_pub_df.loc[new_pub_df[pmid_col] == pmid].squeeze()
+                        insert_publication(pub_values.tolist())
+                        pub_df.loc[len(pub_df)] = pub_values
+                        
+                    
+def display_add_to_dataset_feature(tab, df, new_pub_df):
+    st.header("Add to dataset")
+    col1, col2, col3 = st.columns(3)
+    
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
+    selected_projects = st.session_state.get(tab + "_selected_projects", [])
+    
+    with st.form(key=(tab + "_add_form")):
+        add_selection = st.multiselect("Add selection:", df[acc_col], default=selected_projects, key=(tab + "_add_selection"))
+        
+        st.form_submit_button("Add", on_click=add_to_dataset, args=(df, new_pub_df, add_selection))
+
+
 def get_project_labels(project_id):
     if project_id in project_df[acc_col].unique():
         project_labels = project_df[project_df[acc_col] == project_id][annot_col].item()
         if project_labels:
             return project_labels.split(DELIMITER)
     return []
- 
+    
+
 def update_labels(tab, df, new_pub_df=None):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     project_id = df.iloc[selected_row_index][acc_col]
@@ -338,24 +375,13 @@ def update_labels(tab, df, new_pub_df=None):
             else:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = None
     else:
-        # Global variable used so that display is actually changed
+        add_to_dataset(df.iloc[selected_row_index], new_pub_df)
+        
+        # Display update
         api_project_df.at[selected_row_index, annot_col] = updated_labels_str
-        
-        project_values = df.iloc[selected_row_index].tolist()
-        project_values += ['' for i in range(len(project_columns) - len(project_values))]
-        
-        project_df.loc[len(project_df.index)] = project_values
-        insert_annotation(project_values)
-        
-        publications = df.at[selected_row_index, pub_col]
-        if publications and new_pub_df is not None:
-            for pmid in publications.split(DELIMITER):
-                if pmid in new_pub_df[pmid_col].unique() and pmid not in pub_df[pmid_col].unique():
-                    pub_values = new_pub_df.loc[new_pub_df[pmid_col] == pmid].squeeze()
-                    insert_publication(pub_values.tolist())
-                    pub_df.loc[len(pub_df)] = pub_values
             
     st.session_state[tab + "_new"] = ""
+    
 
 @st.cache_data(show_spinner=False)    
 def get_label_options(project_df):
@@ -366,7 +392,8 @@ def get_label_options(project_df):
                 label_options.update(set(annotation.split(DELIMITER)))
         label_options = sorted(list(label_options))
     return label_options
-
+    
+    
 def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     project_id = df.iloc[selected_row_index][acc_col]
@@ -389,27 +416,7 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
             labels = ""
             new = st.text_input("Create new", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
 
-        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df)) 
-        
-
-def display_add_to_dataset_feature(tab, df):
-    st.header("Add to dataset")
-    col1, col2, col3 = st.columns(3)
-    
-    # with col1:
-        # add_selection = st.button("Add selection")
-    # with col2:
-        # st.write("or")
-    # with col3:
-        # add_all = st.button("Add all")
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
-    selected_projects = st.session_state.get(tab + "_selected_projects", [])
-    
-    with st.form(key=(tab + "_add_form")):
-        add_selection = st.multiselect("Add selection:", df[acc_col], default=selected_projects, key=(tab + "_add_selection"))
-        
-        st.form_submit_button("Add", args=(add_selection,))
+        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df))
         
         
 @st.cache_resource(show_spinner=checking_msg)
@@ -537,8 +544,8 @@ with search_tab:
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(tab_2, api_project_df, aggrid_columns)
-            # display_add_to_dataset_feature(tab_2, api_project_df)
-            display_annotation_feature(tab_2, api_project_df, api_pub_df)
+            display_add_to_dataset_feature(tab_2, api_project_df, api_pub_df)
+            # display_annotation_feature(tab_2, api_project_df, api_pub_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
