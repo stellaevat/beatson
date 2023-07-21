@@ -316,7 +316,6 @@ def get_project_labels(project_id):
         if project_labels:
             return project_labels.split(DELIMITER)
     return []
-        
  
 def update_labels(tab, df, new_pub_df=None):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
@@ -358,19 +357,21 @@ def update_labels(tab, df, new_pub_df=None):
             
     st.session_state[tab + "_new"] = ""
 
-def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
-    
-    # TODO: May want to move this outside method
+@st.cache_data(show_spinner=False)    
+def get_label_options(project_df):
     label_options = set()
     if not project_df.empty:
         for annotation in project_df[annot_col]:
             if annotation is not None:
                 label_options.update(set(annotation.split(DELIMITER)))
         label_options = sorted(list(label_options))
+    return label_options
+
+def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
+    project_id = df.iloc[selected_row_index][acc_col]
     
-    
+    label_options = get_label_options(project_df)
     original_labels = get_project_labels(project_id)
     st.session_state[tab + "_labels"] = original_labels
 
