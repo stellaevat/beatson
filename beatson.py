@@ -475,36 +475,28 @@ def check_dataset(project_df):
 def int_column(col):
     return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
     
-@st.cache_resource(show_spinner="Processing predictions")
-def process_predictions(y_predicted, y_probabilities, to_annotate, labels, predict_df, _learn_df):
+@st.cache_data(show_spinner="Processing predictions...")
+def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     labels = np.array(labels)
+    unlabelled_df = project_df[project_df[annot_col].isnull()]
     
-    # Dropped columns added back
-    predict_df[predict_col] = None
-    predict_df[learn_col] = None
-    
-    for i, project_id in enumerate(predict_df[acc_col]):
+    for i, project_id in enumerate(unlabelled_df[acc_col]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(labels[predicted_mask])
         # TODO: Takes way too long, make async?
         # update_predicted(project_id, predicted_str)
-        predict_df.loc[predict_df[acc_col] == project_id, predict_col] = predicted_str
         project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
         
     if to_annotate:
-        # Mark previous projects as no longer requiring label
-        for project_id in _learn_df[acc_col]:
+        old_learn_df = project_df[int_column(project_df[learn_col]) > 0]
+        for project_id in old_learn_df[acc_col]:
             update_to_annotate(project_id, "0")
             project_df.loc[project_df[acc_col] == project_id, learn_col] = "0"
         
-        # Mark new projects as requiring label (ranked by importance)
-        _learn_df = predict_df.iloc[to_annotate, :]
-        for i, project_id in enumerate(_learn_df[acc_col]):
+        learn_df = unlabelled_df.iloc[to_annotate, :]
+        for i, project_id in enumerate(learn_df[acc_col]):
             update_to_annotate(project_id, str(i+1))
-            _learn_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
             project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
-            
-    return predict_df, _learn_df
  
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
@@ -558,24 +550,27 @@ with predict_tab:
     start_button = st.button("Start", key="start_button")
     st.write("")
     st.write("")
-    
-    # Columns dropped for cacheing purposes (irrelevant to cached method)
-    predict_df = project_df[project_df[annot_col].isnull()].drop([predict_col, learn_col], axis=1)
-    learn_df = project_df[int_column(project_df[learn_col]) > 0]
-    
+
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
             y_predicted, y_probabilities, to_annotate = predict(X_labelled, y_labelled, X_unlabelled)
-            predict_df, learn_df = process_predictions(y_predicted, y_probabilities, to_annotate, labels, predict_df, learn_df)
-
+            
+            # Columns irrelevant to method cacheing dropped
+            df = project_df.drop([predict_col, learn_col], axis=1)
+            process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
+            
+            st.session_state.new_predictions = True
+    
+    predict_df = project_df[project_df[predict_col].notnull()]
+    if predict_df is not None and not predict_df.empty:
+        if st.session_state.get("new_predictions", False):
             st.header("Predicted labels")
-            display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
-            st.session_state.show_predictions = True
-    elif st.session_state.get("show_predictions", False):
-        st.write("Predicted labels:")
+        else:
+            st.header("Previously predicted labels")
         display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
-                
+    
+    learn_df = project_df[int_column(project_df[learn_col]) > 0]    
     if learn_df is not None and not learn_df.empty:
         st.header("Improve predictions")
         st.write("To improve performance, consider annotating the following projects:")
