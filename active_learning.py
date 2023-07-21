@@ -13,8 +13,7 @@ from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-# TODO: Replace with en_core_sci_sm
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_sci_sm")
 
 LABELLED, UNLABELLED, TEST = 0.6, 0.2, 0.2
 ITERATIONS = 10
@@ -27,7 +26,6 @@ predict_msg = "Running prediction algorithm..."
 
 @st.cache_resource(show_spinner=False)
 def get_classifier():
-    ## TODO: Is there any way to fix random state of OVR too?
     clf = OneVsRestClassifier(estimator=SVC(kernel='rbf', probability=True, random_state=42))
     return clf
     
@@ -79,7 +77,7 @@ def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_label = expected_loss_reduction_score[:SELECTION]
+    to_label = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
     return to_label
   
 # Simplified MMC Algorithm 
@@ -90,7 +88,7 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
     y_predicted[y_predicted < 1] = -1
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_label = expected_loss_reduction_score[:SELECTION]
+    to_label = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
     return to_label
   
 # BinMin Algorithm
@@ -98,7 +96,7 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
 def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
-    to_label = most_uncertain_label_score[:SELECTION]
+    to_label = most_uncertain_label_score[:SELECTION] if SELECTION < len(most_uncertain_label_score) else most_uncertain_label_score
     return to_label
 
 
@@ -119,4 +117,3 @@ def predict(X_labelled, y_labelled, X_unlabelled):
     y_probabilities = None
 
     return y_predicted, y_probabilities, to_label
-    
