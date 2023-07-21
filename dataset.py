@@ -16,7 +16,7 @@ rettype="xml"
 retmode="xml"
 gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
 gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
-delimiter = ", "
+DELIMITER = ", "
 style_tags = ["b", "i", "p"]
 
 @st.cache_resource(show_spinner=False)
@@ -146,7 +146,7 @@ def get_project_data(project):
             pub_id = pub["attrs"]["id"].strip()
             if pub_id.isnumeric():
                 pub_list.append(pub_id)
-    project_data["PMIDs"] = delimiter.join(pub_list)
+    project_data["PMIDs"] = DELIMITER.join(pub_list)
     
     project_data = clean_text(project_data)
     return project_data
@@ -180,11 +180,11 @@ def get_publication_data(pub):
             mesh_list.append(name.strip())
         if qualifier:
             mesh_list.append(qualifier.strip())
-    pub_data["MeSH"] = delimiter.join(mesh_list)
+    pub_data["MeSH"] = DELIMITER.join(mesh_list)
             
     key_section = pub.get("KeywordList", [{}])[0].get("Keyword", [])
     keyword_list = [keyword["text"].strip() for keyword in key_section if "text" in keyword]
-    pub_data["Keywords"] = delimiter.join(keyword_list)
+    pub_data["Keywords"] = DELIMITER.join(keyword_list)
     
     pub_data = clean_text(pub_data)
     return pub_data
@@ -192,10 +192,11 @@ def get_publication_data(pub):
 @st.cache_data(show_spinner=False)
 def retrieve_projects(ids):
     all_project_data, all_pub_data = [], []
+    all_pub_ids = set()
     
     if ids:
+        ids = ",".join(set(ids))
         project_dict = efetch(project_db, ids)
-        api_calls = 1
         
         if (projects := project_dict.get("DocumentSummary")):
             for project in projects:
@@ -205,19 +206,17 @@ def retrieve_projects(ids):
                     
                     pub_ids = project_data["PMIDs"]
                     if pub_ids:
-                        pub_ids = ",".join(pub_ids.split(delimiter))
-                        pub_dict = efetch(pub_db, pub_ids)
-                        api_calls += 1
-                        
-                        if (publications := pub_dict.get("PubmedArticle")):
-                            for pub in publications:
-                                if "MedlineCitation" in pub:
-                                    pub_data = get_publication_data(pub["MedlineCitation"][0])
-                                    all_pub_data.append(pub_data)
-                                    
-                    # Not to exceed API limit
-                    if api_calls % api_calls_ps_entrez == 0:
-                        time.sleep(1)
+                        all_pub_ids.update(pub_ids.split(DELIMITER))
+            
+            if all_pub_ids:
+                all_pub_ids = ",".join(all_pub_ids)
+                pub_dict = efetch(pub_db, all_pub_ids)
+                
+                if (publications := pub_dict.get("PubmedArticle")):
+                    for pub in publications:
+                        if "MedlineCitation" in pub:
+                            pub_data = get_publication_data(pub["MedlineCitation"][0])
+                            all_pub_data.append(pub_data)
         else:
             print("Error retrieving projects.")
     else:
@@ -228,7 +227,7 @@ def retrieve_projects(ids):
 # connection = connect_gsheets_api()
 # ids = ""
 # with open("random_ids.txt", encoding="utf8") as f:
-    # ids = ",".join(f.readlines())
+    # ids = f.readlines()
 # all_project_data, all_pub_data = retrieve_projects(ids)
 # if all_project_data:
     # store_data(gsheet_url_proj, all_project_data)

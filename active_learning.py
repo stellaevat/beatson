@@ -77,8 +77,8 @@ def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_label = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
-    return to_label
+    to_annotate = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
+    return to_annotate
   
 # Simplified MMC Algorithm 
 
@@ -88,16 +88,16 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
     y_predicted[y_predicted < 1] = -1
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_label = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
-    return to_label
+    to_annotate = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
+    return to_annotate
   
 # BinMin Algorithm
 
 def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
-    to_label = most_uncertain_label_score[:SELECTION] if SELECTION < len(most_uncertain_label_score) else most_uncertain_label_score
-    return to_label
+    to_annotate = most_uncertain_label_score[:SELECTION] if SELECTION < len(most_uncertain_label_score) else most_uncertain_label_score
+    return to_annotate
 
 
   
@@ -112,8 +112,8 @@ def predict(X_labelled, y_labelled, X_unlabelled):
     clf = get_classifier()
     clf.fit(X_labelled, y_labelled)
     
-    to_label = binmin_query_selection(clf, X_unlabelled).tolist()
+    to_annotate = binmin_query_selection(clf, X_unlabelled).tolist()
     y_predicted = clf.predict(X_unlabelled)
     y_probabilities = None
 
-    return y_predicted, y_probabilities, to_label
+    return y_predicted, y_probabilities, to_annotate

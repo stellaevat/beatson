@@ -41,7 +41,7 @@ org_col = "Organism"
 pub_col = "PMIDs"
 annot_col = "Annotation"
 predict_col = "Prediction"
-learn_col = "To_Label"
+learn_col = "To_Annotate"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
 aggrid_columns = [acc_col, title_col, annot_col]
 aggrid_prediction_columns = [acc_col, title_col, predict_col]
@@ -123,7 +123,6 @@ def api_search(search_terms):
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
             
-        # TODO: Should these be removed or just show up with their labels?
         for i, row in search_df.iterrows():
             project_id = row[acc_col]
             if project_id in project_df[acc_col].unique():
@@ -277,10 +276,10 @@ def update_annotation(project_id, annotation):
             """
     connection.execute(update)
     
-def update_to_label(project_id, to_label):
+def update_to_annotate(project_id, to_annotate):
     update = f"""
             UPDATE "{gsheet_url_proj}"
-            SET {learn_col} = "{to_label}"
+            SET {learn_col} = "{to_annotate}"
             WHERE {acc_col} = "{project_id}"
             """
     connection.execute(update)
@@ -317,7 +316,7 @@ def get_project_labels(project_id):
     return []
         
  
-def update_labels(tab, df, pub_df=None):
+def update_labels(tab, df, new_pub_df=None):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     project_id = df.iloc[selected_row_index][acc_col]
     
@@ -334,30 +333,30 @@ def update_labels(tab, df, pub_df=None):
             if updated_labels_str:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = updated_labels_str
                 if project_df.loc[project_df[acc_col] == project_id, learn_col].item() == True:
-                    # TODO: Uncomment if we decide that annotated projects should go away immediately
-                    # update_to_label(project_id, False)
-                    # project_df.loc[project_df[acc_col] == project_id, learn_col] = False
                     st.session_state[tab_3 + "_selected_row_index"] = 0
             else:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = None
     else:
         # Global variable used so that display is actually changed
         api_project_df.at[selected_row_index, annot_col] = updated_labels_str
+        
         project_values = df.iloc[selected_row_index].tolist()
         project_values += ['' for i in range(len(project_columns) - len(project_values))]
         
         project_df.loc[len(project_df.index)] = project_values
         insert_annotation(project_values)
         
-        if pub_df is not None and project_values[pub_col] is not None:
-            for pmid in project_values[pub_col].split(DELIMITER):
-                if pmid in pub_df[pmid_col].unique():
-                    pub_values = pub_df.loc[pub_df[pmid_col] == pmid].squeeze()
+        publications = df.at[selected_row_index, pub_col]
+        if publications and new_pub_df is not None:
+            for pmid in publications.split(DELIMITER):
+                if pmid in new_pub_df[pmid_col].unique() and pmid not in pub_df[pmid_col].unique():
+                    pub_values = new_pub_df.loc[new_pub_df[pmid_col] == pmid].squeeze()
                     insert_publication(pub_values.tolist())
+                    pub_df.loc[len(pub_df)] = pub_values
             
     st.session_state[tab + "_new"] = ""
 
-def display_annotation_feature(tab, df, pub_df=None, allow_new=True):
+def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     project_id = df.iloc[selected_row_index][acc_col]
     
@@ -387,7 +386,7 @@ def display_annotation_feature(tab, df, pub_df=None, allow_new=True):
             labels = ""
             new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
 
-        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, pub_df)) 
+        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df)) 
         
 
 def display_add_to_dataset_feature(tab, df):
@@ -471,10 +470,10 @@ def check_dataset(project_df):
 
 @st.cache_data(show_spinner=False) 
 def int_column(col):
-    return pd.Series([int(val) if val is not None else 0 for val in col])
+    return pd.Series([int(val) if val else 0 for val in col])
     
 @st.cache_resource(show_spinner="Processing predictions")
-def process_predictions(y_predicted, y_probabilities, to_label, labels, predict_df, _learn_df):
+def process_predictions(y_predicted, y_probabilities, to_annotate, labels, predict_df, _learn_df):
     labels = np.array(labels)
     
     # Dropped columns added back
@@ -489,16 +488,16 @@ def process_predictions(y_predicted, y_probabilities, to_label, labels, predict_
         predict_df.loc[predict_df[acc_col] == project_id, predict_col] = predicted_str
         project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
         
-    if to_label:
+    if to_annotate:
         # Mark previous projects as no longer requiring label
         for project_id in _learn_df[acc_col]:
-            update_to_label(project_id, "0")
+            update_to_annotate(project_id, "0")
             project_df.loc[project_df[acc_col] == project_id, learn_col] = "0"
         
         # Mark new projects as requiring label (ranked by importance)
-        _learn_df = predict_df.iloc[to_label, :]
+        _learn_df = predict_df.iloc[to_annotate, :]
         for i, project_id in enumerate(_learn_df[acc_col]):
-            update_to_label(project_id, str(i+1))
+            update_to_annotate(project_id, str(i+1))
             _learn_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
             project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
             
@@ -544,7 +543,7 @@ with search_tab:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(tab_2, api_project_df, aggrid_columns)
             # display_add_to_dataset_feature(tab_2, api_project_df)
-            display_annotation_feature(tab_2, api_project_df)
+            display_annotation_feature(tab_2, api_project_df, api_pub_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
@@ -564,8 +563,8 @@ with predict_tab:
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
-            y_predicted, y_probabilities, to_label = predict(X_labelled, y_labelled, X_unlabelled)
-            predict_df, learn_df = process_predictions(y_predicted, y_probabilities, to_label, labels, predict_df, learn_df)
+            y_predicted, y_probabilities, to_annotate = predict(X_labelled, y_labelled, X_unlabelled)
+            predict_df, learn_df = process_predictions(y_predicted, y_probabilities, to_annotate, labels, predict_df, learn_df)
 
             st.header("Predicted labels")
             display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
@@ -579,5 +578,5 @@ with predict_tab:
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
-        display_interactive_grid("Suggestions", learn_df, aggrid_columns)
-        display_annotation_feature("Suggestions", learn_df)
+        display_interactive_grid("Improve", learn_df, aggrid_columns)
+        display_annotation_feature("Improve", learn_df)
