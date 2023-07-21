@@ -14,7 +14,7 @@ from active_learning import predict
 st.set_page_config(page_title="BioProject Annotation")
 
 tab_names = ["Annotate", "Search", "Predict"]
-tab_1, tab_2, tab_3 = tab_names
+annot_tab_name, search_tab_name, predict_tab_name = tab_names
 
 Entrez.email = "stell.aeva@hotmail.com"
 project_db = "bioproject"
@@ -260,7 +260,12 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
         
         selected_row_index = selected_data.index.tolist()[0]
         st.session_state[tab + "_selected_row_index"] = selected_row_index
-        st.session_state[tab + "_selected_projects"] = st.session_state.get(tab + "_selected_projects", []) + [df.iloc[selected_row_index][acc_col]]
+        
+        selected_id = df.iloc[selected_row_index][acc_col]
+        selected_projects = st.session_state.get(tab + "_selected_projects", [])
+        if selected_id not in selected_projects:
+            st.session_state[tab + "_selected_projects"] = selected_projects + [selected_id]
+            
         st.session_state[tab + "_rerun"] = 1
         
         st.experimental_rerun()    
@@ -310,7 +315,7 @@ def insert_publication(values):
     connection.execute(insert)
  
  
-def add_to_dataset(df, new_pub_df, project_ids=None):
+def add_to_dataset(tab, df, new_pub_df, project_ids=None):
     if project_ids:
         df = df[df[acc_col].isin(project_ids)]
         
@@ -330,6 +335,13 @@ def add_to_dataset(df, new_pub_df, project_ids=None):
                         insert_publication(pub_values.tolist())
                         pub_df.loc[len(pub_df)] = pub_values
                         
+            # Display update
+            api_project_df.drop(i, axis=0, inplace=True)
+            selected_projects = st.session_state.get(tab + "_selected_projects", [])
+            if project[acc_col] in selected_projects:
+                selected_projects.remove(project[acc_col])
+                st.session_state[tab + "_selected_projects"] = selected_projects
+                        
                     
 def display_add_to_dataset_feature(tab, df, new_pub_df):
     st.header("Add to dataset")
@@ -342,7 +354,7 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
     with st.form(key=(tab + "_add_form")):
         add_selection = st.multiselect("Add selection:", df[acc_col], default=selected_projects, key=(tab + "_add_selection"))
         
-        st.form_submit_button("Add", on_click=add_to_dataset, args=(df, new_pub_df, add_selection))
+        st.form_submit_button("Add", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
 
 
 def get_project_labels(project_id):
@@ -370,14 +382,11 @@ def update_labels(tab, df, new_pub_df=None):
             if updated_labels_str:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = updated_labels_str
                 if project_df.loc[project_df[acc_col] == project_id, learn_col].item() == True:
-                    st.session_state[tab_3 + "_selected_row_index"] = 0
+                    st.session_state[predict_tab_name + "_selected_row_index"] = 0
             else:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = None
     else:
         add_to_dataset(df.iloc[selected_row_index], new_pub_df)
-        
-        # Display update
-        api_project_df.at[selected_row_index, annot_col] = updated_labels_str
             
     st.session_state[tab + "_new"] = ""
     
@@ -516,7 +525,7 @@ with annotate_tab:
     annotate_df = project_df
 
     if not project_df.empty:
-        search_terms = display_search_feature(tab_1)
+        search_terms = display_search_feature(annot_tab_name)
         
         if search_terms:   
             search_df = local_search(search_terms, project_df)
@@ -527,8 +536,8 @@ with annotate_tab:
                 st.write(f"No results for '{search_terms}'. All projects:")
         
         if not annotate_df.empty:
-            display_interactive_grid(tab_1, annotate_df, annot_columns)
-            display_annotation_feature(tab_1, annotate_df)
+            display_interactive_grid(annot_tab_name, annotate_df, annot_columns)
+            display_annotation_feature(annot_tab_name, annotate_df)
         
     else:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
@@ -537,14 +546,14 @@ with annotate_tab:
 with search_tab:
     st.header("Search BioProject")
     
-    api_terms = display_search_feature(tab_2)
+    api_terms = display_search_feature(search_tab_name)
     if api_terms:
         api_project_df, api_pub_df = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
-            display_interactive_grid(tab_2, api_project_df, search_columns)
-            display_add_to_dataset_feature(tab_2, api_project_df, api_pub_df)
-            # display_annotation_feature(tab_2, api_project_df, api_pub_df)
+            display_interactive_grid(search_tab_name, api_project_df, search_columns)
+            display_add_to_dataset_feature(search_tab_name, api_project_df, api_pub_df)
+            # display_annotation_feature(search_tab_name, api_project_df, api_pub_df)
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
@@ -574,7 +583,7 @@ with predict_tab:
             st.header("Predicted labels")
         else:
             st.header("Previously predicted labels")
-        display_interactive_grid(tab_3, predict_df, predict_columns)
+        display_interactive_grid(predict_tab_name, predict_df, predict_columns)
     
     learn_df = project_df[int_column(project_df[learn_col]) > 0]    
     if learn_df is not None and not learn_df.empty:
