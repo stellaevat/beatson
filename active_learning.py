@@ -114,7 +114,7 @@ def predict(X_labelled, y_labelled, X_unlabelled):
     clf = get_classifier()
     clf.fit(X_labelled, y_labelled)
     
-    to_label = binmin_query_selection(clf, X_unlabelled)
+    to_label = binmin_query_selection(clf, X_unlabelled).tolist()
     y_predicted = clf.predict(X_unlabelled)
     y_probabilities = None
 

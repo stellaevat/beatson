@@ -40,7 +40,7 @@ scope_col = "Scope"
 org_col = "Organism"
 pub_col = "PMIDs"
 annot_col = "Annotation"
-predict_col = "Predicted_Labels"
+predict_col = "Prediction"
 learn_col = "To_Label"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
 aggrid_columns = [acc_col, title_col, annot_col]
@@ -172,7 +172,7 @@ def display_project_details(project):
     
     for field in detail_columns:
         if not project[field]:
-            df = df.drop(field)
+            df = df.drop(field, axis=0)
             
     st.write(df.to_html(render_links=True, escape=False), unsafe_allow_html=True)
     st.write("")
@@ -211,7 +211,7 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     
     builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
     builder.configure_column(title_col, flex=3)
-    builder.configure_column(annot_col, flex=1)
+    builder.configure_column(columns[-1], flex=1)
     builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
     builder.configure_grid_options(**options_dict)
@@ -443,8 +443,9 @@ def get_sample_matrix(df, pub_df):
                 text += " " + " ".join([field for field in pub_df.loc[pub_df[pmid_col] == pmid].iloc[0] if field is not None])
         X_labelled.append(text)
     return X_labelled
-    
-def check_dataset():
+ 
+@st.cache_data(show_spinner="Checking dataset...") 
+def check_dataset(project_df):
     unlabelled_df = project_df[project_df[annot_col].isnull()]
     labelled_df = project_df[project_df[annot_col].notnull()]
     y_labelled, label_to_index, index_to_label = get_label_matrix(labelled_df)
@@ -467,7 +468,41 @@ def check_dataset():
         return X_labelled, X_unlabelled, y_labelled, labels
         
     return None, None, None, None
- 
+
+@st.cache_data(show_spinner=False) 
+def int_column(col):
+    return pd.Series([int(val) if val is not None else 0 for val in col])
+    
+@st.cache_resource(show_spinner="Processing predictions")
+def process_predictions(y_predicted, y_probabilities, to_label, labels, predict_df, _learn_df):
+    labels = np.array(labels)
+    
+    # Dropped columns added back
+    predict_df[predict_col] = None
+    predict_df[learn_col] = None
+    
+    for i, project_id in enumerate(predict_df[acc_col]):
+        predicted_mask = np.where(y_predicted[i] > 0, True, False)
+        predicted_str = DELIMITER.join(labels[predicted_mask])
+        # TODO: Takes way too long, make async?
+        # update_predicted(project_id, predicted_str)
+        predict_df.loc[predict_df[acc_col] == project_id, predict_col] = predicted_str
+        project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+        
+    if to_label:
+        # Mark previous projects as no longer requiring label
+        for project_id in _learn_df[acc_col]:
+            update_to_label(project_id, "0")
+            project_df.loc[project_df[acc_col] == project_id, learn_col] = "0"
+        
+        # Mark new projects as requiring label (ranked by importance)
+        _learn_df = predict_df.iloc[to_label, :]
+        for i, project_id in enumerate(_learn_df[acc_col]):
+            update_to_label(project_id, str(i+1))
+            _learn_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
+            project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
+            
+    return predict_df, _learn_df
  
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
@@ -517,47 +552,32 @@ with predict_tab:
     st.header("Predict annotations")
     
     message = st.empty()
+    message.write("Click **Start** to get label predictions for all unannotated projects.")
     start_button = st.button("Start", key="start_button")
     st.write("")
     st.write("")
     
-    learn_df = project_df[project_df[learn_col] == True]
+    # Columns dropped for cacheing purposes (irrelevant to cached method)
+    predict_df = project_df[project_df[annot_col].isnull()].drop([predict_col, learn_col], axis=1)
+    learn_df = project_df[int_column(project_df[learn_col]) > 0]
     
     if start_button:
-        X_labelled, X_unlabelled, y_labelled, labels = check_dataset()
+        X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
             y_predicted, y_probabilities, to_label = predict(X_labelled, y_labelled, X_unlabelled)
-            
-            # TODO: Deal with metrics too
-            with st.spinner("Processing predictions..."):
-                unlabelled_df = project_df[project_df[annot_col].isnull()]
-                labels = np.array(labels)
-                for i, project_id in enumerate(unlabelled_df[acc_col]):
-                    predicted_mask = np.where(y_predicted[i] > 0, True, False)
-                    predicted_str = DELIMITER.join(labels[predicted_mask])
-                    # TODO: Takes way too long, make async?
-                    update_predicted(project_id, predicted_str)
-                    unlabelled_df.at[i, predict_col] = predicted_str
-                    project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
-                    
-                if to_label.tolist():
-                    # Mark previous projects as no longer requiring label
-                    for project_id in learn_df[acc_col].unique():
-                        update_to_label(project_id, "0")
-                        project_df.loc[project_df[acc_col] == project_id, learn_col] = False
-                    
-                    # Mark new projects as requiring label
-                    learn_df = unlabelled_df.iloc[to_label.tolist(), :]
-                    for project_id in learn_df[acc_col].unique():
-                        update_to_label(project_id, "1")
-                        project_df.loc[project_df[acc_col] == project_id, learn_col] = True
-                
-            st.write("Predicted labels:")
-            display_interactive_grid(tab_3, unlabelled_df, aggrid_prediction_columns)
+            predict_df, learn_df = process_predictions(y_predicted, y_probabilities, to_label, labels, predict_df, learn_df)
+
+            st.header("Predicted labels")
+            display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
+            st.session_state.show_predictions = True
+    elif st.session_state.get("show_predictions", False):
+        st.write("Predicted labels:")
+        display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
                 
     if learn_df is not None and not learn_df.empty:
         st.header("Improve predictions")
-        st.write("To improve prediction accuracy, consider annotating the following projects:")
-        learn_df = learn_df.sort_index(axis=0, ignore_index=True) # Resets index to 0, 1, 2...
+        st.write("To improve performance, consider annotating the following projects:")
+        # Sort by annotation importance to active learning
+        learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid("Suggestions", learn_df, aggrid_columns)
         display_annotation_feature("Suggestions", learn_df)
