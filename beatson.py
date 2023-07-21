@@ -27,6 +27,7 @@ gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
 gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 
 DELIMITER = ", "
+EMPTY_VALUE = "-"
 PROJECT_THRESHOLD = 10
 LABEL_THRESHOLD = 3
 
@@ -77,7 +78,7 @@ streamlit_css = r'''
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
     
-# @st.cache_resource(show_spinner=loading_msg)
+@st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
     connection = connect(
         ":memory:",
@@ -96,6 +97,7 @@ def load_data(gsheet_url, _columns):
     df = pd.DataFrame(executed_query.fetchall())
     if not df.empty:
         df.columns = _columns
+        # df = df.fillna(value=EMPTY_VALUE)
     return df
     
 @st.cache_data(show_spinner=False)
@@ -146,7 +148,7 @@ def local_search(search_terms, df):
     return search_df
     
 def display_search_feature(tab):
-    search = st.text_input("", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
+    search = st.text_input("Search", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
     st.write("")
     
     if st.session_state.get(tab + "_prev_search", "") != search:
@@ -310,8 +312,8 @@ def insert_publication(values):
  
 def get_project_labels(project_id):
     if project_id in project_df[acc_col].unique():
-        project_labels = project_df[project_df[acc_col] == project_id][annot_col].values[0]
-        if project_labels is not None:
+        project_labels = project_df[project_df[acc_col] == project_id][annot_col].item()
+        if project_labels:
             return project_labels.split(DELIMITER)
     return []
         
@@ -377,14 +379,14 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
         if label_options and allow_new:
             col1, col2 = st.columns(2)
             with col1:
-                labels = st.multiselect("", label_options, label_visibility="collapsed", key=(tab + "_labels"))
+                labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
             with col2:
-                new = st.text_input("", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+                new = st.text_input("Create new", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
         elif label_options:
-            labels = st.multiselect("", label_options, label_visibility="collapsed", key=(tab + "_labels"))
+            labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
         else:
             labels = ""
-            new = st.text_input("", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+            new = st.text_input("Create new", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
 
         st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df)) 
         
@@ -470,7 +472,7 @@ def check_dataset(project_df):
 
 @st.cache_data(show_spinner=False) 
 def int_column(col):
-    return pd.Series([int(val) if val else 0 for val in col])
+    return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
     
 @st.cache_resource(show_spinner="Processing predictions")
 def process_predictions(y_predicted, y_probabilities, to_annotate, labels, predict_df, _learn_df):
