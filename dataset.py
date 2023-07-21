@@ -195,7 +195,6 @@ def retrieve_projects(ids):
     all_pub_ids = set()
     
     if ids:
-        ids = ",".join(set(ids))
         project_dict = efetch(project_db, ids)
         
         if (projects := project_dict.get("DocumentSummary")):
@@ -209,7 +208,6 @@ def retrieve_projects(ids):
                         all_pub_ids.update(pub_ids.split(DELIMITER))
             
             if all_pub_ids:
-                all_pub_ids = ",".join(all_pub_ids)
                 pub_dict = efetch(pub_db, all_pub_ids)
                 
                 if (publications := pub_dict.get("PubmedArticle")):

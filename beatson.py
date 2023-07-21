@@ -44,8 +44,9 @@ annot_col = "Annotation"
 predict_col = "Prediction"
 learn_col = "To_Annotate"
 project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
-aggrid_columns = [acc_col, title_col, annot_col]
-aggrid_prediction_columns = [acc_col, title_col, predict_col]
+annot_columns = [acc_col, title_col, annot_col]
+search_columns = [acc_col, title_col]
+predict_columns = [acc_col, title_col, predict_col]
 detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
 text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
 
@@ -116,7 +117,10 @@ def api_search(search_terms):
     # TODO: find synonyms
     
     ids = esearch(project_db, "+OR+".join(search_terms))
-    all_project_data, all_pub_data = retrieve_projects(ids)
+    # Check both uid/acc columns because esearch unreliable
+    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[uid_col, acc_col]].values]
+
+    all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
         search_df.columns = project_columns[:-3]
@@ -124,11 +128,6 @@ def api_search(search_terms):
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
-            
-        for i, row in search_df.iterrows():
-            project_id = row[acc_col]
-            if project_id in project_df[acc_col].unique():
-                search_df.at[i, annot_col] = project_df[project_df[acc_col] == project_id][annot_col].item()
                 
     return search_df, search_pub_df
             
@@ -528,7 +527,7 @@ with annotate_tab:
                 st.write(f"No results for '{search_terms}'. All projects:")
         
         if not annotate_df.empty:
-            display_interactive_grid(tab_1, annotate_df, aggrid_columns)
+            display_interactive_grid(tab_1, annotate_df, annot_columns)
             display_annotation_feature(tab_1, annotate_df)
         
     else:
@@ -543,7 +542,7 @@ with search_tab:
         api_project_df, api_pub_df = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
-            display_interactive_grid(tab_2, api_project_df, aggrid_columns)
+            display_interactive_grid(tab_2, api_project_df, search_columns)
             display_add_to_dataset_feature(tab_2, api_project_df, api_pub_df)
             # display_annotation_feature(tab_2, api_project_df, api_pub_df)
         else:
@@ -575,7 +574,7 @@ with predict_tab:
             st.header("Predicted labels")
         else:
             st.header("Previously predicted labels")
-        display_interactive_grid(tab_3, predict_df, aggrid_prediction_columns)
+        display_interactive_grid(tab_3, predict_df, predict_columns)
     
     learn_df = project_df[int_column(project_df[learn_col]) > 0]    
     if learn_df is not None and not learn_df.empty:
@@ -583,5 +582,5 @@ with predict_tab:
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
-        display_interactive_grid("Improve", learn_df, aggrid_columns)
+        display_interactive_grid("Improve", learn_df, annot_columns)
         display_annotation_feature("Improve", learn_df)
