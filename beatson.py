@@ -23,7 +23,7 @@ base_pub_url = "https://pubmed.ncbi.nlm.nih.gov/"
 
 DELIMITER = ", "
 EMPTY_VALUE = "-"
-NOT_TO_LABEL = "0"
+NOT_TO_ANNOTATE = "0"
 IDTYPE = "acc"
 RETMAX = 10
 RESULTS_PER_PAGE = 10
@@ -112,7 +112,7 @@ def api_search(search_terms):
     all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
-        search_df.columns = project_columns[project_columns]
+        search_df.columns = project_columns
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
@@ -290,8 +290,8 @@ def update_predicted(project_id, predicted):
 def clear_to_annotate():
     update = f"""
             UPDATE "{gsheet_url_proj}"
-            SET {learn_col} = {NOT_TO_LABEL}
-            WHERE {learn_col} != {NOT_TO_LABEL}
+            SET {learn_col} = "{NOT_TO_ANNOTATE}"
+            WHERE {learn_col} != "{NOT_TO_ANNOTATE}"
             """
     connection.execute(update)
     
@@ -335,6 +335,8 @@ def add_to_dataset(tab, df, new_pub_df, project_ids=None):
             if project[acc_col] in selected_projects:
                 selected_projects.remove(project[acc_col])
                 st.session_state[tab + "_selected_projects"] = selected_projects
+                
+    st.session_state[tab + "_selected_row_index"] = 0
                         
                     
 def display_add_to_dataset_feature(tab, df, new_pub_df):
@@ -497,19 +499,20 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     
     for i, project_id in enumerate(unlabelled_df[acc_col]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
-        predicted_str = DELIMITER.join(labels[predicted_mask])
-        if predicted_str != project_df.at[project_df[acc_col] == project_id, predict_col]:
+        predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
+        if predicted_str != project_df.loc[project_df[acc_col] == project_id, predict_col].item():
             update_predicted(project_id, predicted_str)
             project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
         
     if to_annotate:
         clear_to_annotate()
-        project_df.loc[int_column(learn_col) > 0, learn_col] = NOT_TO_LABEL
+        project_df.loc[int_column(project_df[learn_col]) > 0, learn_col] = NOT_TO_ANNOTATE
         
         learn_df = unlabelled_df.iloc[to_annotate, :]
         for i, project_id in enumerate(learn_df[acc_col]):
             update_to_annotate(project_id, str(i+1))
             project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
+
 
 st.button("&circlearrowright;") 
 st.title("BioProject Annotation")
@@ -552,7 +555,6 @@ with search_tab:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(search_tab_name, api_project_df, search_columns)
             display_add_to_dataset_feature(search_tab_name, api_project_df, api_pub_df)
-            # display_annotation_feature(search_tab_name, api_project_df, api_pub_df)
         elif found:
             st.write(f"No results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
         else:
@@ -562,7 +564,7 @@ with predict_tab:
     st.header("Predict annotations")
     
     message = st.empty()
-    message.write("Click **Start** to get label predictions for all unannotated projects.")
+    message.write("Click **Start** to get predictions for all unannotated projects.")
     start_button = st.button("Start", key="start_button")
     st.write("")
     st.write("")
