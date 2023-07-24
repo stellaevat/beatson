@@ -13,49 +13,37 @@ from active_learning import predict
 
 st.set_page_config(page_title="BioProject Annotation")
 
-tab_names = ["Annotate", "Search", "Predict"]
-annot_tab_name, search_tab_name, predict_tab_name = tab_names
+gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
+gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 
 Entrez.email = "stell.aeva@hotmail.com"
 project_db = "bioproject"
 base_project_url = "https://www.ncbi.nlm.nih.gov/" + project_db + "/"
 base_pub_url = "https://pubmed.ncbi.nlm.nih.gov/"
-retmax = 10
-results_per_page = 10
-
-gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
-gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
 
 DELIMITER = ", "
 EMPTY_VALUE = "-"
+NOT_TO_LABEL = "0"
+IDTYPE = "acc"
+RETMAX = 10
+RESULTS_PER_PAGE = 10
 PROJECT_THRESHOLD = 10
 LABEL_THRESHOLD = 3
 
-uid_col = "UID"
-acc_col = "Accession"
-title_col = "Title"
-name_col = "Name"
-descr_col = "Description"
-type_col = "Data_Type"
-scope_col = "Scope"
-org_col = "Organism"
-pub_col = "PMIDs"
-annot_col = "Annotation"
-predict_col = "Prediction"
-learn_col = "To_Annotate"
-project_columns = [uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col]
+tab_names = ["Annotate", "Search", "Predict"]
+annot_tab_name, search_tab_name, predict_tab_name = tab_names
+
+project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Prediction", "To_Annotate"]
+uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col = project_columns
+
+pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
+pmid_col, pubtitle_col, abstract_col, mesh_col, key_col = pub_columns
+
 annot_columns = [acc_col, title_col, annot_col]
 search_columns = [acc_col, title_col]
 predict_columns = [acc_col, title_col, predict_col]
 detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
 text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
-
-pmid_col = "PMID"
-pubtitle_col = "Title"
-abstract_col = "Abstract"
-mesh_col = "MeSH"
-key_col = "Keywords"
-pub_columns = [pmid_col, pubtitle_col, abstract_col, mesh_col, key_col]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
@@ -63,10 +51,11 @@ checking_msg = "Checking dataset..."
 
 primary_colour = "#81b1cc"
 aggrid_css = {
-        "#gridToolBar": {"display": "none;"},
-        ".ag-theme-alpine, .ag-theme-alpine-dark": {"--ag-font-size": "12px;"},
-        ".ag-cell": {"padding": "0px 12px;"},
-    }
+    "#gridToolBar": {"display": "none;"},
+    ".ag-theme-alpine, .ag-theme-alpine-dark": {"--ag-font-size": "12px;"},
+    ".ag-cell": {"padding": "0px 12px;"},
+}
+    
 streamlit_css = r'''
     <style>
         h3 {font-size: 1.5rem; color: ''' + primary_colour + ''';}
@@ -103,7 +92,7 @@ def load_data(gsheet_url, _columns):
 def esearch(database, terms):
     if not terms:
         return None
-    handle = Entrez.esearch(db=database, term=terms, retmax=retmax, idtype="acc")
+    handle = Entrez.esearch(db=database, term=terms, retmax=RETMAX, idtype=IDTYPE)
     ids = Entrez.read(handle)["IdList"]
     return ids
 
@@ -123,8 +112,7 @@ def api_search(search_terms):
     all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
-        search_df.columns = project_columns[:-3]
-        search_df = search_df.reindex(columns=project_columns).fillna(value='')
+        search_df.columns = project_columns[project_columns]
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
@@ -213,7 +201,7 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     builder.configure_column(title_col, flex=3)
     builder.configure_column(columns[-1], flex=1)
     builder.configure_selection(selection_mode=selection_mode)
-    builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=results_per_page)
+    builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=RESULTS_PER_PAGE)
     builder.configure_grid_options(**options_dict)
     builder.configure_side_bar()
 
@@ -223,7 +211,7 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
 def display_interactive_grid(tab, df, columns, selection_mode="single"):
     rerun = st.session_state.get(tab + "_rerun", 0)
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    starting_page = selected_row_index // results_per_page
+    starting_page = selected_row_index // RESULTS_PER_PAGE
 
     grid_options = get_grid_options(df, columns, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
@@ -296,6 +284,14 @@ def update_predicted(project_id, predicted):
             UPDATE "{gsheet_url_proj}"
             SET {predict_col} = "{predicted}"
             WHERE {acc_col} = "{project_id}"
+            """
+    connection.execute(update)
+    
+def clear_to_annotate():
+    update = f"""
+            UPDATE "{gsheet_url_proj}"
+            SET {learn_col} = {NOT_TO_LABEL}
+            WHERE {learn_col} != {NOT_TO_LABEL}
             """
     connection.execute(update)
     
@@ -502,15 +498,13 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     for i, project_id in enumerate(unlabelled_df[acc_col]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(labels[predicted_mask])
-        # TODO: Takes way too long, make async?
-        # update_predicted(project_id, predicted_str)
-        project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+        if predicted_str != project_df.at[project_df[acc_col] == project_id, predict_col]:
+            update_predicted(project_id, predicted_str)
+            project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
         
     if to_annotate:
-        old_learn_df = project_df[int_column(project_df[learn_col]) > 0]
-        for project_id in old_learn_df[acc_col]:
-            update_to_annotate(project_id, "0")
-            project_df.loc[project_df[acc_col] == project_id, learn_col] = "0"
+        clear_to_annotate()
+        project_df.loc[int_column(learn_col) > 0, learn_col] = NOT_TO_LABEL
         
         learn_df = unlabelled_df.iloc[to_annotate, :]
         for i, project_id in enumerate(learn_df[acc_col]):

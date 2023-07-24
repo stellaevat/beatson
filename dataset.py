@@ -6,17 +6,20 @@ from Bio import Entrez
 from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 
-Entrez.email = "stell.aeva@hotmail.com"
-api_calls_ps_entrez = 3
-api_calls_pm_google = 60
-project_db = "bioproject"
-pub_db = "pubmed"
-idtype="acc"
-rettype="xml"
-retmode="xml"
 gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
 gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
+
+Entrez.email = "stell.aeva@hotmail.com"
+project_db = "bioproject"
+pub_db = "pubmed"
+
 DELIMITER = ", "
+NOT_TO_LABEL = "0"
+RETTYPE = "xml"
+RETMODE = "xml"
+ENTREZ_API_CALLS_PS = 3
+GOOGLE_API_CALLS_PM = 60
+
 style_tags = ["b", "i", "p"]
 
 @st.cache_resource(show_spinner=False)
@@ -38,14 +41,14 @@ def store_data(gsheet_url, entries):
         entry_str = '("' + '", "'.join([entry[col] for col in columns]) + '")'
         values.append(entry_str)
         
-    for batch in range(0, len(values), api_calls_pm_google):
-        values_str = ",\n".join(values[batch : min(batch + api_calls_pm_google, len(values))])
+    for batch in range(0, len(values), GOOGLE_API_CALLS_PM):
+        values_str = ",\n".join(values[batch : min(batch + GOOGLE_API_CALLS_PM, len(values))])
         insert = f''' 
                 INSERT INTO "{gsheet_url}" ({", ".join(columns)})
                 VALUES {values_str}
                 '''
         connection.execute(insert)
-        print(f"{min(batch + api_calls_pm_google, len(values))}/{len(values)} entries stored...")
+        print(f"{min(batch + GOOGLE_API_CALLS_PM, len(values))}/{len(values)} entries stored...")
         # Not to exceed API limit
         time.sleep(60)
         
@@ -91,7 +94,7 @@ def parse_xml(element):
 def efetch(database, ids):
     if not ids:
         return None
-    handle = Entrez.efetch(db=database, id=ids, rettype=rettype, retmode=retmode)
+    handle = Entrez.efetch(db=database, id=ids, rettype=RETTYPE, retmode=RETMODE)
     tree = ET.parse(handle)
     tag, data_dict = parse_xml(tree.getroot())
     return data_dict 
@@ -147,6 +150,10 @@ def get_project_data(project):
             if pub_id.isnumeric():
                 pub_list.append(pub_id)
     project_data["PMIDs"] = DELIMITER.join(pub_list)
+    
+    project_data["Annotation"] = ""
+    project_data["Prediction"] = ""
+    project_data["To_Annotate"] = NOT_TO_LABEL
     
     project_data = clean_text(project_data)
     return project_data
