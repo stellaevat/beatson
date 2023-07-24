@@ -73,8 +73,7 @@ streamlit_css = r'''
         thead {display : none;}
         th {color: ''' + primary_colour + ''';}
         [data-testid="stForm"] {border: 0px; padding: 0px;}
-        [kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
-        [kind="secondary"] {position: absolute; right: 0px;}
+        button[kind="secondary"], button[kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
     </style>
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
@@ -117,6 +116,8 @@ def api_search(search_terms):
     # TODO: find synonyms
     
     ids = esearch(project_db, "+OR+".join(search_terms))
+    found = True if ids else False
+    
     # Check both uid/acc columns because esearch unreliable
     ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[uid_col, acc_col]].values]
 
@@ -124,12 +125,12 @@ def api_search(search_terms):
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
         search_df.columns = project_columns[:-3]
-        search_df[annot_col] = None
+        search_df = search_df.reindex(columns=project_columns).fillna(value='')
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
                 
-    return search_df, search_pub_df
+    return search_df, search_pub_df, found
             
             
 @st.cache_resource(show_spinner=search_msg)
@@ -227,7 +228,7 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
 
     grid_options = get_grid_options(df, columns, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
-        df[columns].fillna(value=EMPTY_VALUE), 
+        df[columns].replace('', None).fillna(value=EMPTY_VALUE), 
         gridOptions=grid_options,
         width="100%",
         theme="alpine",
@@ -246,6 +247,7 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
         st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
     else:
         st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
+    st.write("")
     st.write("")
 
     if rerun:
@@ -321,11 +323,8 @@ def add_to_dataset(tab, df, new_pub_df, project_ids=None):
         
     for i, project in pd.DataFrame(df).iterrows():
         if project[acc_col] not in project_df[acc_col].unique():
-            project_values = project.tolist()
-            project_values += ['' for i in range(len(project_columns) - len(project_values))]
-            
-            project_df.loc[len(project_df.index)] = project_values
-            insert_annotation(project_values)
+            project_df.loc[len(project_df.index)] = project.tolist()
+            insert_annotation(project.fillna(value='').tolist())
             
             publications = project[pub_col]
             if publications and new_pub_df is not None:
@@ -352,9 +351,15 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
     selected_projects = st.session_state.get(tab + "_selected_projects", [])
     
     with st.form(key=(tab + "_add_form")):
-        add_selection = st.multiselect("Add selection:", df[acc_col], default=selected_projects, key=(tab + "_add_selection"))
+        add_selection = st.multiselect("Add selection", df[acc_col], default=selected_projects, label_visibility="collapsed", key=(tab + "_add_selection"))
         
-        st.form_submit_button("Add", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
+        # For nice alignment
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c4:
+            st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
+        with c5:
+            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df, df[acc_col].tolist()))
+        
 
 
 def get_project_labels(project_id):
@@ -548,12 +553,14 @@ with search_tab:
     
     api_terms = display_search_feature(search_tab_name)
     if api_terms:
-        api_project_df, api_pub_df = api_search(api_terms)
+        api_project_df, api_pub_df, found = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
-            st.write(f"Results for '{api_terms}':")
+            st.write(f"Results for '{api_terms}' (not already in the dataset):")
             display_interactive_grid(search_tab_name, api_project_df, search_columns)
             display_add_to_dataset_feature(search_tab_name, api_project_df, api_pub_df)
             # display_annotation_feature(search_tab_name, api_project_df, api_pub_df)
+        elif found:
+            st.write(f"No more results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
