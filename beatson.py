@@ -73,7 +73,7 @@ streamlit_css = r'''
         thead {display : none;}
         th {color: ''' + primary_colour + ''';}
         [data-testid="stForm"] {border: 0px; padding: 0px;}
-        button[kind="secondary"], button[kind="secondaryFormSubmit"] {position: absolute; right: 0px;}
+        button[kind="secondary"], button[kind="secondaryFormSubmit"] {position: absolute; right: 0px; z-index: 1;}
     </style>
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
@@ -97,7 +97,6 @@ def load_data(gsheet_url, _columns):
     df = pd.DataFrame(executed_query.fetchall())
     if not df.empty:
         df.columns = _columns
-        # df = df.fillna(value=EMPTY_VALUE)
     return df
     
 @st.cache_data(show_spinner=False)
@@ -517,7 +516,8 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
         for i, project_id in enumerate(learn_df[acc_col]):
             update_to_annotate(project_id, str(i+1))
             project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
- 
+
+st.button("&circlearrowright;") 
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
 
@@ -555,12 +555,12 @@ with search_tab:
     if api_terms:
         api_project_df, api_pub_df, found = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
-            st.write(f"Results for '{api_terms}' (not already in the dataset):")
+            st.write(f"Results for '{api_terms}':")
             display_interactive_grid(search_tab_name, api_project_df, search_columns)
             display_add_to_dataset_feature(search_tab_name, api_project_df, api_pub_df)
             # display_annotation_feature(search_tab_name, api_project_df, api_pub_df)
         elif found:
-            st.write(f"No more results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
+            st.write(f"No results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
