@@ -506,7 +506,7 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
         
     if to_annotate:
         clear_to_annotate()
-        project_df.loc[int_column(project_df[learn_col]) > 0, learn_col] = NOT_TO_ANNOTATE
+        project_df.loc[project_df[learn_col] != NOT_TO_ANNOTATE, learn_col] = NOT_TO_ANNOTATE
         
         learn_df = unlabelled_df.iloc[to_annotate, :]
         for i, project_id in enumerate(learn_df[acc_col]):
@@ -572,7 +572,9 @@ with predict_tab:
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
-            y_predicted, y_probabilities, to_annotate = predict(X_labelled, y_labelled, X_unlabelled)
+            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci = predict(X_labelled, y_labelled, X_unlabelled)
+            st.session_state.f1_micro_ci = f1_micro_ci
+            st.session_state.f1_macro_ci = f1_macro_ci
             
             # Columns irrelevant to method cacheing dropped
             df = project_df.drop([predict_col, learn_col], axis=1)
@@ -584,6 +586,12 @@ with predict_tab:
     if predict_df is not None and not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted labels")
+            
+            f1_micro_ci = st.session_state.f1_micro_ci
+            st.write(f"Micro-f1: {np.mean(f1_micro_ci):.3f}, with 95% confidence interval ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})")
+            
+            f1_macro_ci = st.session_state.f1_macro_ci
+            st.write(f"Macro-f1: {np.mean(f1_macro_ci):.3f}, with 95% confidence interval ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")
         else:
             st.header("Previously predicted labels")
         display_interactive_grid(predict_tab_name, predict_df, predict_columns)
