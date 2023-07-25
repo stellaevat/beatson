@@ -203,7 +203,6 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=RESULTS_PER_PAGE)
     builder.configure_grid_options(**options_dict)
-    builder.configure_side_bar()
 
     grid_options = builder.build()
     return grid_options
@@ -610,30 +609,32 @@ import streamlit.components.v1 as components
 components.html(
     """
         <script>
-            const doc = window.parent.document;
-            
-            tabs = Array.from(doc.querySelectorAll('button[role=tab]'));
-            buttons = Array.from(doc.querySelectorAll('button[kind=secondary]'));
-            const reloadButton = buttons.find(el => el.innerText === '↻');
-            
-            for (let i = 0; i < tabs.length; i++) {
-                tabs[i].addEventListener("click", function () {
-                    reloadButton.click();
-                });
-            }
-            
-            const aggridFrames =  doc.querySelectorAll('iframe[title="st_aggrid.agGrid"]')
-
-            for (let i = 0; i < aggridFrames.length; i++) {
-                var aggridDoc = aggridFrames[i].contentWindow.document;
-                gridArrows = aggridDoc.getElementsByClassName('ag-paging-button');
+            window.onload = setTimeout(function () {
+                const doc = window.parent.document;
                 
-                for (let j = 0; j < gridArrows.length; j++) {
-                    gridArrows[j].addEventListener("click", function () {
+                tabs = doc.querySelectorAll('button[role="tab"]');
+                buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
+                reloadButton = buttons.find(el => el.innerText === '↻');
+                
+                for (let i = 0; i < tabs.length; i++) {
+                    tabs[i].addEventListener("click", function () {
                         reloadButton.click();
                     });
                 }
-            }
+
+                aggridFrames = doc.querySelectorAll('iframe[title="st_aggrid.agGrid"]');
+
+                for (let i = 0; i < aggridFrames.length; i++) {
+                    var aggridDoc = aggridFrames[i].contentWindow.document;
+                    var gridArrows = aggridDoc.getElementsByClassName("ag-paging-button");
+                    
+                    for (let j = 0; j < gridArrows.length; j++) {
+                        gridArrows[j].addEventListener("click", function () {
+                            reloadButton.click();
+                        });
+                    }
+                }
+            }, 1000);
         </script>
     """,
     height=0, width=0
