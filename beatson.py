@@ -62,7 +62,7 @@ streamlit_css = r'''
         thead {display : none;}
         th {color: ''' + primary_colour + ''';}
         [data-testid="stForm"] {border: 0px; padding: 0px;}
-        button[kind="secondary"], button[kind="secondaryFormSubmit"] {position: absolute; right: 0px; z-index: 1;}
+        button[kind="secondary"], button[kind="secondaryFormSubmit"] {float: right; z-index: 1;}
     </style>
 '''
 st.markdown(streamlit_css, unsafe_allow_html=True)
@@ -147,7 +147,19 @@ def display_search_feature(tab):
 
 def id_to_url(base_url, page_id):
     return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
-   
+ 
+def show_details(tab):
+    st.session_state[tab + "_project_details_hidden"] = False
+    
+def hide_details(tab):
+    st.session_state[tab + "_project_details_hidden"] = True
+    
+def go_to_next(tab, selected_row_index):
+    st.session_state[tab + "_selected_row_index"] = selected_row_index + 1
+    
+def go_to_previous(tab, selected_row_index):
+    st.session_state[tab + "_selected_row_index"] = selected_row_index - 1
+    
 def display_project_details(project):
     st.write("")
     st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
@@ -169,11 +181,21 @@ def display_project_details(project):
     if project[descr_col]:
         st.write(project[descr_col])
         
-def show_details(tab):
-    st.session_state[tab + "_project_details_hidden"] = False
+       
+def display_navigation_buttons(tab, total_projects):
+    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     
-def hide_details(tab):
-    st.session_state[tab + "_project_details_hidden"] = True
+    col1, col2 = st.columns(2)
+    with col1:
+        if selected_row_index > 0:
+            st.button("Previous", on_click=go_to_previous, args=(tab, selected_row_index), key=(tab + "_prev"))
+            
+    with col2:
+        if selected_row_index < total_projects - 1:
+            st.button("Next", on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
+            
+    st.write("")
+    st.write("")
 
 @st.cache_data(show_spinner=False)
 def get_grid_options(df, columns, starting_page, selected_row_index, selection_mode="single"):
@@ -207,7 +229,7 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     grid_options = builder.build()
     return grid_options
     
-def display_interactive_grid(tab, df, columns, selection_mode="single"):
+def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode="single"):
     rerun = st.session_state.get(tab + "_rerun", 0)
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     starting_page = selected_row_index // RESULTS_PER_PAGE
@@ -233,15 +255,16 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
         st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
     else:
         st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
-    st.write("")
-    st.write("")
 
     if rerun:
         if not project_details_hidden:
             display_project_details(df.iloc[selected_row_index])
+            if nav_buttons:
+                display_navigation_buttons(tab, len(df))
+            
         st.session_state[tab + "_starting_page"] = starting_page
         st.session_state[tab + "_rerun"] = 0
-        
+
     elif not selected_df.empty:
         selected_mask = df[acc_col].isin(selected_df[acc_col])
         selected_data = df.loc[selected_mask]
@@ -260,6 +283,8 @@ def display_interactive_grid(tab, df, columns, selection_mode="single"):
     else:
         if not project_details_hidden:
             display_project_details(df.iloc[selected_row_index])
+            if nav_buttons:
+                display_navigation_buttons(tab, len(df))
 
 
 def update_annotation(project_id, annotation):
@@ -382,6 +407,8 @@ def update_labels(tab, df, new_pub_df=None):
             
             if updated_labels_str:
                 project_df.loc[project_df[acc_col] == project_id, annot_col] = updated_labels_str
+                
+                # So that selected row still within bounds
                 if project_df.loc[project_df[acc_col] == project_id, learn_col].item() == True:
                     st.session_state[predict_tab_name + "_selected_row_index"] = 0
             else:
@@ -513,7 +540,7 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
             project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
 
 
-st.button("&circlearrowright;") 
+st.button("&circlearrowright;", key="reload_tab") 
 st.title("BioProject Annotation")
 annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
 
@@ -593,16 +620,17 @@ with predict_tab:
             st.write(f"Macro-f1: {np.mean(f1_macro_ci):.3f}, with 95% confidence interval ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")
         else:
             st.header("Previously predicted labels")
-        display_interactive_grid(predict_tab_name, predict_df, predict_columns)
+        display_interactive_grid(predict_tab_name, predict_df, predict_columns, nav_buttons=False)
     
+    learn_section_name = "Learn"
     learn_df = project_df[int_column(project_df[learn_col]) > 0]    
     if learn_df is not None and not learn_df.empty:
         st.header("Improve predictions")
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
-        display_interactive_grid("Improve", learn_df, annot_columns)
-        display_annotation_feature("Improve", learn_df)
+        display_interactive_grid(learn_section_name, learn_df, annot_columns)
+        display_annotation_feature(learn_section_name, learn_df)
         
 import streamlit.components.v1 as components
 
@@ -611,10 +639,9 @@ components.html(
         <script>
             window.onload = setTimeout(function () {
                 const doc = window.parent.document;
-                
                 tabs = doc.querySelectorAll('button[role="tab"]');
                 buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
-                reloadButton = buttons.find(el => el.innerText === '↻');
+                reloadButton = buttons.find(el => el.innerText === "↻");
                 
                 for (let i = 0; i < tabs.length; i++) {
                     tabs[i].addEventListener("click", function () {
@@ -625,8 +652,8 @@ components.html(
                 aggridFrames = doc.querySelectorAll('iframe[title="st_aggrid.agGrid"]');
 
                 for (let i = 0; i < aggridFrames.length; i++) {
-                    var aggridDoc = aggridFrames[i].contentWindow.document;
-                    var gridArrows = aggridDoc.getElementsByClassName("ag-paging-button");
+                    let aggridDoc = aggridFrames[i].contentWindow.document;
+                    let gridArrows = aggridDoc.getElementsByClassName("ag-paging-button");
                     
                     for (let j = 0; j < gridArrows.length; j++) {
                         gridArrows[j].addEventListener("click", function () {
@@ -634,6 +661,17 @@ components.html(
                         });
                     }
                 }
+                
+                var timer = setInterval(function(){ 
+                    let docFresh = window.parent.document;
+                    let buttonsFresh = Array.from(docFresh.querySelectorAll('button[kind="secondary"]'));
+                    let previousButtons = buttonsFresh.filter(el => el.innerText === "Previous");
+                    
+                    for (let i = 0; i < previousButtons.length; i++) {
+                        previousButtons[i].style.float = "left";
+                    }
+                }, 500);
+                
             }, 1000);
         </script>
     """,
