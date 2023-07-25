@@ -5,7 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
-from streamlit.components.v1 import html
+import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
@@ -350,11 +350,11 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
     with st.form(key=(tab + "_add_form")):
         add_selection = st.multiselect("Add selection", df[acc_col], default=selected_projects, label_visibility="collapsed", key=(tab + "_add_selection"))
         
-        # For nice alignment
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c4:
+        # Buttons as close as possible without line-breaks
+        col1, col2 = st.columns([0.818, 0.182])
+        with col1:
             st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
-        with c5:
+        with col2:
             st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df, df[acc_col].tolist()))
         
 
@@ -604,3 +604,23 @@ with predict_tab:
         learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid("Improve", learn_df, annot_columns)
         display_annotation_feature("Improve", learn_df)
+        
+import streamlit.components.v1 as components
+
+components.html(
+    """
+        <script>
+            const doc = window.parent.document;
+            tabs = Array.from(doc.querySelectorAll('button[role=tab]'));
+            buttons = Array.from(doc.querySelectorAll('button[kind=secondary]'));
+            const reloadButton = buttons.find(el => el.innerText === '↻');
+            
+            for (let i = 0; i < tabs.length; i++) {
+                tabs[i].addEventListener("click", function () {
+                    reloadButton.click();
+                });
+            }
+        </script>
+    """,
+    height=0, width=0
+)
