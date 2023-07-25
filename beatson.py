@@ -611,6 +611,7 @@ components.html(
     """
         <script>
             const doc = window.parent.document;
+            
             tabs = Array.from(doc.querySelectorAll('button[role=tab]'));
             buttons = Array.from(doc.querySelectorAll('button[kind=secondary]'));
             const reloadButton = buttons.find(el => el.innerText === '↻');
@@ -619,6 +620,19 @@ components.html(
                 tabs[i].addEventListener("click", function () {
                     reloadButton.click();
                 });
+            }
+            
+            const aggridFrames =  doc.querySelectorAll('iframe[title="st_aggrid.agGrid"]')
+
+            for (let i = 0; i < aggridFrames.length; i++) {
+                var aggridDoc = aggridFrames[i].contentWindow.document;
+                gridArrows = aggridDoc.getElementsByClassName('ag-paging-button');
+                
+                for (let j = 0; j < gridArrows.length; j++) {
+                    gridArrows[j].addEventListener("click", function () {
+                        reloadButton.click();
+                    });
+                }
             }
         </script>
     """,
