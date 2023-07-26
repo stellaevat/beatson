@@ -151,7 +151,7 @@ def get_project_data(project):
     project_data["PMIDs"] = DELIMITER.join(pub_list)
     
     project_data["Annotation"] = ""
-    project_data["Prediction"] = ""
+    project_data["Predicted"] = ""
     project_data["To_Annotate"] = ""
     
     project_data = clean_text(project_data)

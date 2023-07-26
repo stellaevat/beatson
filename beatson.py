@@ -32,7 +32,7 @@ LABEL_THRESHOLD = 3
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
-project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Prediction", "To_Annotate"]
+project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "To_Annotate"]
 UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, LEARN_COL = project_columns
 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
@@ -171,9 +171,6 @@ def display_project_details(project):
     
     st.write("")
     st.subheader(f"{project[TITLE_COL] if project[TITLE_COL] else project[NAME_COL] if project[NAME_COL] else project[ACC_COL]}")
-    
-    
-        
     st.write("")
     
     df = pd.DataFrame(project[detail_columns])
@@ -191,19 +188,19 @@ def display_project_details(project):
     st.write("")
     
     if project[DESCR_COL]:
-        st.write(f"**Description:** {project[DESCR_COL]}")
+        st.write(f"**{DESCR_COL}:** {project[DESCR_COL]}")
         
     labels = ""
     if project[PREDICT_COL]:
         labels += f"""
-            **Prediction:** *{project[PREDICT_COL]}*  
+            **Predicted annotation:** *{project[PREDICT_COL]}*  
         """ 
     if project[ANNOT_COL]:
-        labels += f"**Annotation:** *{project[ANNOT_COL]}*"
-        
+        labels += f"**Manual annotation:** *{project[ANNOT_COL]}*"
     if labels:
         st.write(labels)
-        st.write("")
+        
+    st.write("")
         
        
 def display_navigation_buttons(tab, total_projects):
@@ -326,9 +323,10 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
 
 
 def update_sheet(project_id, value, column, sheet=GSHEET_URL_PROJ):
+    value = f'"{value}"' if value else 'NULL'
     update = f"""
         UPDATE "{sheet}"
-        SET {column} = "{value}"
+        SET {column} = {value}
         WHERE {ACC_COL} = "{project_id}"
     """
     connection.execute(update)
@@ -397,9 +395,9 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
         
 
 
-def get_project_labels(project_id):
+def get_project_labels(project_id, column=ANNOT_COL):
     if project_id in project_df[ACC_COL].unique():
-        project_labels = project_df[project_df[ACC_COL] == project_id][ANNOT_COL].item()
+        project_labels = project_df[project_df[ACC_COL] == project_id][column].item()
             
         if project_labels:
             return project_labels.split(DELIMITER)
@@ -537,26 +535,44 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     labels = np.array(labels)
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     
-    count = 0
     for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
-        if predicted_str != project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item():
-            count += 1
+        
+        old_prediction = project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item()
+        old_prediction = old_prediction if old_prediction else ""
+        
+        if predicted_str != old_prediction:
             update_sheet(project_id, predicted_str, PREDICT_COL)
             project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
-            
-    print("Total: ", len(unlabelled_df))
-    print("Updated: ", count)
         
     if to_annotate:
-        clear_sheet_column(LEARN_COL)
-        project_df[LEARN_COL] = None
+        old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
+        old_order = {project[LEARN_COL] : project[ACC_COL] for (i, project) in old_learn_df.iterrows()}
         
-        learn_df = unlabelled_df.iloc[to_annotate, :]
-        for i, project_id in enumerate(learn_df[ACC_COL]):
-            update_sheet(project_id, str(i+1), LEARN_COL)
-            project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = str(i+1)
+        new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
+        new_order = {str(i+1) : project[ACC_COL] for (i, project) in new_learn_df.iterrows()}
+        
+        differences = set(old_order.items()) ^ set(new_order.items())
+        if differences:
+            # Update with minimum API calls
+            # (unnecessary for small number of suggestions, could just use else branch)
+            changes = {project_id for (order, project_id) in differences}
+            if len(changes) < len(new_order) + 1:
+                for (order, project_id) in differences:
+                    if new_order[order] == project_id:
+                        update_sheet(project_id, order, LEARN_COL)
+                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
+                    else:
+                        update_sheet(project_id, None, LEARN_COL)
+                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = None
+            else:
+                clear_sheet_column(LEARN_COL)
+                project_df[LEARN_COL] = None
+            
+                for order, project_id in new_order.items():
+                    update_sheet(project_id, order, LEARN_COL)
+                    project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
             
     
 st.button(reload_btn, key="reload_btn") 
@@ -628,7 +644,7 @@ with predict:
     predict_df = project_df[project_df[PREDICT_COL].notnull()]
     if predict_df is not None and not predict_df.empty:
         if st.session_state.get("new_predictions", False):
-            st.header("Predicted labels")
+            st.header("Predicted")
             
             f1_micro_ci = st.session_state.f1_micro_ci
             st.write(f"Micro-f1: {np.mean(f1_micro_ci):.3f}, with 95% confidence interval ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})")
@@ -636,7 +652,7 @@ with predict:
             f1_macro_ci = st.session_state.f1_macro_ci
             st.write(f"Macro-f1: {np.mean(f1_macro_ci):.3f}, with 95% confidence interval ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")
         else:
-            st.header("Previously predicted labels")
+            st.header("Previously predicted")
         display_interactive_grid(TAB_PREDICT, predict_df, predict_columns, nav_buttons=False)
     
     learn_section_name = "Learn"
