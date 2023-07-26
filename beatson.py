@@ -64,7 +64,7 @@ css = f"""
     <style>
         h3 {{font-size: 1.5rem; color: { primary_colour };}}
         thead {{display : none;}}
-        th {{color: { primary_colour };}}
+        th {{color: { primary_colour }; font-weight: normal;}}
         [data-testid="stForm"] {{border: 0px; padding: 0px;}}
         button[kind="secondary"], button[kind="secondaryFormSubmit"] {{float: right; z-index: 1;}}
     </style>
@@ -172,6 +172,10 @@ def display_project_details(project):
     st.write("")
     st.subheader(f"{project[TITLE_COL] if project[TITLE_COL] else project[NAME_COL] if project[NAME_COL] else project[ACC_COL]}")
     
+    
+        
+    st.write("")
+    
     df = pd.DataFrame(project[detail_columns])
     df.loc[ACC_COL] = id_to_url(BASE_URL_PROJ, project[ACC_COL])
     
@@ -187,7 +191,19 @@ def display_project_details(project):
     st.write("")
     
     if project[DESCR_COL]:
-        st.write(project[DESCR_COL])
+        st.write(f"**Description:** {project[DESCR_COL]}")
+        
+    labels = ""
+    if project[PREDICT_COL]:
+        labels += f"""
+            **Prediction:** *{project[PREDICT_COL]}*  
+        """ 
+    if project[ANNOT_COL]:
+        labels += f"**Annotation:** *{project[ANNOT_COL]}*"
+        
+    if labels:
+        st.write(labels)
+        st.write("")
         
        
 def display_navigation_buttons(tab, total_projects):
@@ -384,6 +400,7 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
 def get_project_labels(project_id):
     if project_id in project_df[ACC_COL].unique():
         project_labels = project_df[project_df[ACC_COL] == project_id][ANNOT_COL].item()
+            
         if project_labels:
             return project_labels.split(DELIMITER)
     return []
@@ -437,7 +454,7 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     st.session_state[tab + "_labels"] = original_labels
 
     with st.form(key=(tab + "_annotation_form")):
-        st.write(f"Edit **{project_id}** labels:")
+        st.write(f"Edit **{project_id}** annotation:")
         if label_options and allow_new:
             col1, col2 = st.columns(2)
             with col1:
@@ -459,15 +476,13 @@ def get_label_matrix(df):
     for annotation in df[ANNOT_COL]:
         if annotation is not None:
             labels.update(set(annotation.split(DELIMITER)))
-    
-    # Sort labels
-    i = 0
+    labels = sorted(list(labels))
+
     label_to_index = {}
     index_to_label = {}
-    for label in labels:
+    for i, label in enumerate(labels):
         label_to_index[label] = i
         index_to_label[i] = label
-        i += 1
     
     y_labelled = np.zeros((len(df), len(labels)))
     for i, annotation in enumerate(df[ANNOT_COL]):
