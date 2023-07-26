@@ -14,7 +14,6 @@ PROJECT_DB = "bioproject"
 PUB_DB = "pubmed"
 
 DELIMITER = ", "
-NOT_TO_LABEL = "0"
 RETTYPE = "xml"
 RETMODE = "xml"
 ENTREZ_API_CALLS_PS = 3
@@ -153,7 +152,7 @@ def get_project_data(project):
     
     project_data["Annotation"] = ""
     project_data["Prediction"] = ""
-    project_data["To_Annotate"] = NOT_TO_LABEL
+    project_data["To_Annotate"] = ""
     
     project_data = clean_text(project_data)
     return project_data

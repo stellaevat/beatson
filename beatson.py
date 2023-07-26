@@ -22,8 +22,7 @@ BASE_URL_PROJ = "https://www.ncbi.nlm.nih.gov/" + PROJECT_DB + "/"
 BASE_URL_PUB = "https://pubmed.ncbi.nlm.nih.gov/"
 
 DELIMITER = ", "
-EMPTY_VALUE = "-"
-NOT_TO_ANNOTATE = "0"
+PLACEHOLDER = "-"
 IDTYPE = "acc"
 RETMAX = 10
 RESULTS_PER_PAGE = 10
@@ -60,17 +59,17 @@ aggrid_css = {
 }
 
 markdown_translation = str.maketrans({char : '\\' + char for char in r'\`*_{}[]()#+-.!:><&'})
-    
-streamlit_css = r'''
+
+css = f"""
     <style>
-        h3 {font-size: 1.5rem; color: ''' + primary_colour + ''';}
-        thead {display : none;}
-        th {color: ''' + primary_colour + ''';}
-        [data-testid="stForm"] {border: 0px; padding: 0px;}
-        button[kind="secondary"], button[kind="secondaryFormSubmit"] {float: right; z-index: 1;}
+        h3 {{font-size: 1.5rem; color: { primary_colour };}}
+        thead {{display : none;}}
+        th {{color: { primary_colour };}}
+        [data-testid="stForm"] {{border: 0px; padding: 0px;}}
+        button[kind="secondary"], button[kind="secondaryFormSubmit"] {{float: right; z-index: 1;}}
     </style>
-'''
-st.markdown(streamlit_css, unsafe_allow_html=True)
+"""
+st.markdown(css, unsafe_allow_html=True)
     
 @st.cache_resource(show_spinner=loading_msg)
 def connect_gsheets_api():
@@ -258,7 +257,7 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
 
     grid_options = get_grid_options(df, columns, starting_page, selected_row_index, selection_mode)
     grid = AgGrid(
-        df[columns].replace('', None).fillna(value=EMPTY_VALUE), 
+        df[columns].replace('', None).fillna(value=PLACEHOLDER), 
         gridOptions=grid_options,
         width="100%",
         theme="alpine",
@@ -310,54 +309,30 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
             display_navigation_buttons(tab, len(df))
 
 
-def update_annotation(project_id, annotation):
+def update_sheet(project_id, value, column, sheet=GSHEET_URL_PROJ):
     update = f"""
-            UPDATE "{GSHEET_URL_PROJ}"
-            SET {ANNOT_COL} = "{annotation}"
-            WHERE {ACC_COL} = "{project_id}"
-            """
+        UPDATE "{sheet}"
+        SET {column} = "{value}"
+        WHERE {ACC_COL} = "{project_id}"
+    """
     connection.execute(update)
     
-def update_to_annotate(project_id, to_annotate):
-    update = f"""
-            UPDATE "{GSHEET_URL_PROJ}"
-            SET {LEARN_COL} = "{to_annotate}"
-            WHERE {ACC_COL} = "{project_id}"
-            """
-    connection.execute(update)
-    
-def update_predicted(project_id, predicted):
-    update = f"""
-            UPDATE "{GSHEET_URL_PROJ}"
-            SET {PREDICT_COL} = "{predicted}"
-            WHERE {ACC_COL} = "{project_id}"
-            """
-    connection.execute(update)
-    
-def clear_to_annotate():
-    update = f"""
-            UPDATE "{GSHEET_URL_PROJ}"
-            SET {LEARN_COL} = "{NOT_TO_ANNOTATE}"
-            WHERE {LEARN_COL} != "{NOT_TO_ANNOTATE}"
-            """
-    connection.execute(update)
-    
-def insert_annotation(values):
+def insert_sheet(values, columns=project_columns, sheet=GSHEET_URL_PROJ):
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
-    insert = f''' 
-            INSERT INTO "{GSHEET_URL_PROJ}" ({", ".join(project_columns)})
-            VALUES {values_str}
-            '''
+    insert = f"""
+        INSERT INTO "{sheet}" ({", ".join(columns)})
+        VALUES {values_str}
+    """
     connection.execute(insert)
-    
-def insert_publication(values):
-    values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
-    insert = f''' 
-            INSERT INTO "{GSHEET_URL_PUB}" ({", ".join(pub_columns)})
-            VALUES {values_str}
-            '''
-    connection.execute(insert)
- 
+   
+def clear_sheet_column(column, sheet=GSHEET_URL_PROJ):
+    clear = f"""
+            UPDATE "{sheet}"
+            SET {column} = NULL
+            WHERE {column} IS NOT NULL
+            """
+    connection.execute(clear)
+
  
 def add_to_dataset(tab, df, new_pub_df, project_ids=None):
     if project_ids:
@@ -366,14 +341,14 @@ def add_to_dataset(tab, df, new_pub_df, project_ids=None):
     for i, project in pd.DataFrame(df).iterrows():
         if project[ACC_COL] not in project_df[ACC_COL].unique():
             project_df.loc[len(project_df.index)] = project.tolist()
-            insert_annotation(project.fillna(value='').tolist())
+            insert_sheet(project.fillna(value='').tolist())
             
             publications = project[PUB_COL]
             if publications and new_pub_df is not None:
                 for pmid in publications.split(DELIMITER):
                     if pmid in new_pub_df[PMID_COL].unique() and pmid not in pub_df[PMID_COL].unique():
                         pub_values = new_pub_df.loc[new_pub_df[PMID_COL] == pmid].squeeze()
-                        insert_publication(pub_values.tolist())
+                        insert_sheet(pub_values.tolist(), pub_columns, GSHEET_URL_PUB)
                         pub_df.loc[len(pub_df)] = pub_values
                         
             # Display update
@@ -426,7 +401,7 @@ def update_labels(tab, df, new_pub_df=None):
     if project_id in project_df[ACC_COL].unique():
         original_labels = get_project_labels(project_id)
         if updated_labels ^ set(original_labels):
-            update_annotation(project_id, updated_labels_str)
+            update_sheet(project_id, updated_labels_str, ANNOT_COL)
             
             if updated_labels_str:
                 project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = updated_labels_str
@@ -485,6 +460,7 @@ def get_label_matrix(df):
         if annotation is not None:
             labels.update(set(annotation.split(DELIMITER)))
     
+    # Sort labels
     i = 0
     label_to_index = {}
     index_to_label = {}
@@ -546,23 +522,28 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     labels = np.array(labels)
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     
+    count = 0
     for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
         if predicted_str != project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item():
-            update_predicted(project_id, predicted_str)
+            count += 1
+            update_sheet(project_id, predicted_str, PREDICT_COL)
             project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
+            
+    print("Total: ", len(unlabelled_df))
+    print("Updated: ", count)
         
     if to_annotate:
-        clear_to_annotate()
-        project_df.loc[project_df[LEARN_COL] != NOT_TO_ANNOTATE, LEARN_COL] = NOT_TO_ANNOTATE
+        clear_sheet_column(LEARN_COL)
+        project_df[LEARN_COL] = None
         
         learn_df = unlabelled_df.iloc[to_annotate, :]
         for i, project_id in enumerate(learn_df[ACC_COL]):
-            update_to_annotate(project_id, str(i+1))
+            update_sheet(project_id, str(i+1), LEARN_COL)
             project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = str(i+1)
-
-
+            
+    
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
 annotate, search, predict = st.tabs(tab_names)
@@ -615,8 +596,6 @@ with predict:
     message = st.empty()
     message.write("Click **Start** to get predictions for all unannotated projects.")
     start_button = st.button("Start", key="start_button")
-    st.write("")
-    st.write("")
 
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
