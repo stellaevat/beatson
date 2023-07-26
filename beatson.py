@@ -9,17 +9,17 @@ import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
-from active_learning import predict
+from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
 
-gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
-gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
+GSHEET_URL_PROJ = st.secrets["private_gsheets_url_proj"]
+GSHEET_URL_PUB = st.secrets["private_gsheets_url_pub"]
 
 Entrez.email = "stell.aeva@hotmail.com"
-project_db = "bioproject"
-base_project_url = "https://www.ncbi.nlm.nih.gov/" + project_db + "/"
-base_pub_url = "https://pubmed.ncbi.nlm.nih.gov/"
+PROJECT_DB = "bioproject"
+BASE_URL_PROJ = "https://www.ncbi.nlm.nih.gov/" + PROJECT_DB + "/"
+BASE_URL_PUB = "https://pubmed.ncbi.nlm.nih.gov/"
 
 DELIMITER = ", "
 EMPTY_VALUE = "-"
@@ -31,23 +31,26 @@ PROJECT_THRESHOLD = 10
 LABEL_THRESHOLD = 3
 
 tab_names = ["Annotate", "Search", "Predict"]
-annot_tab_name, search_tab_name, predict_tab_name = tab_names
+TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
 project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Prediction", "To_Annotate"]
-uid_col, acc_col, title_col, name_col, descr_col, type_col, scope_col, org_col, pub_col, annot_col, predict_col, learn_col = project_columns
+UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, LEARN_COL = project_columns
 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
-pmid_col, pubtitle_col, abstract_col, mesh_col, key_col = pub_columns
+PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
-annot_columns = [acc_col, title_col, annot_col]
-search_columns = [acc_col, title_col]
-predict_columns = [acc_col, title_col, predict_col]
-detail_columns = [acc_col, type_col, scope_col, org_col, pub_col]
-text_columns = [title_col, name_col, descr_col, type_col, scope_col, org_col]
+annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL]
+search_columns = [ACC_COL, TITLE_COL]
+predict_columns = [ACC_COL, TITLE_COL, PREDICT_COL]
+detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
+text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
-checking_msg = "Checking dataset..."
+
+reload_btn = "↻"
+next_btn = "Next"
+prev_btn = "Previous"
 
 primary_colour = "#81b1cc"
 aggrid_css = {
@@ -101,13 +104,14 @@ def esearch(database, terms):
 def api_search(search_terms):
     search_df, search_pub_df = None, None
     search_terms = [term.strip().lower() for term in search_terms.split() if term.strip()]
+    
     # TODO: find synonyms
     
-    ids = esearch(project_db, "+OR+".join(search_terms))
+    ids = esearch(PROJECT_DB, "+OR+".join(search_terms))
     found = True if ids else False
     
     # Check both uid/acc columns because esearch unreliable
-    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[uid_col, acc_col]].values]
+    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values]
 
     all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
     if all_project_data:
@@ -124,6 +128,7 @@ def api_search(search_terms):
 def local_search(search_terms, df):
     search_terms = [term.strip() for term in search_terms.split() if term.strip()]
     search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
+    
     # TODO: find synonyms
     
     raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
@@ -135,15 +140,15 @@ def local_search(search_terms, df):
     return search_df
     
 def display_search_feature(tab):
-    search = st.text_input("Search", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
+    search_terms = st.text_input("Search", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
     st.write("")
     
-    if st.session_state.get(tab + "_prev_search", "") != search:
+    if st.session_state.get(tab + "_prev_search", "") != search_terms:
         st.session_state[tab + "_selected_row_index"] = 0
         st.session_state[tab + "_selected_projects"] = []
-    st.session_state[tab + "_prev_search"] = search
+    st.session_state[tab + "_prev_search"] = search_terms
     
-    return search
+    return search_terms
 
 def id_to_url(base_url, page_id):
     return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
@@ -162,13 +167,13 @@ def go_to_previous(tab, selected_row_index):
     
 def display_project_details(project):
     st.write("")
-    st.subheader(f"{project[title_col] if project[title_col] else project[name_col] if project[name_col] else project[acc_col]}")
+    st.subheader(f"{project[TITLE_COL] if project[TITLE_COL] else project[NAME_COL] if project[NAME_COL] else project[ACC_COL]}")
     
     df = pd.DataFrame(project[detail_columns])
-    df.loc[acc_col] = id_to_url(base_project_url, project[acc_col])
+    df.loc[ACC_COL] = id_to_url(BASE_URL_PROJ, project[ACC_COL])
     
-    if project[pub_col]:
-        df.loc[pub_col] = DELIMITER.join([id_to_url(base_pub_url, pub_id) for pub_id in project[pub_col].split(DELIMITER)])
+    if project[PUB_COL]:
+        df.loc[PUB_COL] = DELIMITER.join([id_to_url(BASE_URL_PUB, pub_id) for pub_id in project[PUB_COL].split(DELIMITER)])
     
     for field in detail_columns:
         if not project[field]:
@@ -178,8 +183,8 @@ def display_project_details(project):
     st.write("")
     st.write("")
     
-    if project[descr_col]:
-        st.write(project[descr_col])
+    if project[DESCR_COL]:
+        st.write(project[DESCR_COL])
         
        
 def display_navigation_buttons(tab, total_projects):
@@ -188,11 +193,11 @@ def display_navigation_buttons(tab, total_projects):
     col1, col2 = st.columns(2)
     with col1:
         if selected_row_index > 0:
-            st.button("Previous", on_click=go_to_previous, args=(tab, selected_row_index), key=(tab + "_prev"))
+            st.button(prev_btn, on_click=go_to_previous, args=(tab, selected_row_index), key=(tab + "_prev"))
             
     with col2:
         if selected_row_index < total_projects - 1:
-            st.button("Next", on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
+            st.button(next_btn, on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
             
     st.write("")
     st.write("")
@@ -201,26 +206,39 @@ def display_navigation_buttons(tab, total_projects):
 def get_grid_options(df, columns, starting_page, selected_row_index, selection_mode="single"):
     options_dict = {
         "enableCellTextSelection" : True,
-        "onFirstDataRendered" : JsCode("""
-            function onFirstDataRendered(params) {
-                params.api.paginationGoToPage(""" + str(starting_page) + """);
-            }
+        
+        "onFirstDataRendered" : JsCode(f"""
+            function onFirstDataRendered(params) {{
+                params.api.paginationGoToPage({ starting_page });
+            }}
+        """),
+        
+        "onPaginationChanged" : JsCode(f"""
+            function onPaginationChanged(params) {{
+                let doc = window.parent.document;
+                let buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
+                let reloadButton = buttons.find(el => el.innerText === "{ reload_btn }");
+                
+                if (typeof reloadButton !== "undefined") {{
+                    reloadButton.click();
+                }}
+            }}
         """),
     }
     
     if selection_mode == "single":
-        options_dict["getRowStyle"] = JsCode("""
-            function(params) {
-                if (params.rowIndex == """ + str(selected_row_index) + """) {
-                    return {'background-color': '""" + primary_colour + """', 'color': 'black'};
-                }
-            }
+        options_dict["getRowStyle"] = JsCode(f"""
+            function(params) {{
+                if (params.rowIndex == { str(selected_row_index) }) {{
+                    return {{'background-color': '{ primary_colour }', 'color': 'black'}};
+                }}
+            }}
         """)
     
     builder = GridOptionsBuilder.from_dataframe(df[columns])
     
-    builder.configure_column(acc_col, lockPosition="left", suppressMovable=True, width=110)
-    builder.configure_column(title_col, flex=3)
+    builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=110)
+    builder.configure_column(TITLE_COL, flex=3)
     builder.configure_column(columns[-1], flex=1)
     builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=RESULTS_PER_PAGE)
@@ -266,63 +284,64 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         st.session_state[tab + "_rerun"] = 0
 
     elif not selected_df.empty:
-        selected_mask = df[acc_col].isin(selected_df[acc_col])
+        selected_mask = df[ACC_COL].isin(selected_df[ACC_COL])
         selected_data = df.loc[selected_mask]
         
         selected_row_index = selected_data.index.tolist()[0]
         st.session_state[tab + "_selected_row_index"] = selected_row_index
         
-        selected_id = df.iloc[selected_row_index][acc_col]
+        selected_id = df.iloc[selected_row_index][ACC_COL]
         selected_projects = st.session_state.get(tab + "_selected_projects", [])
         if selected_id not in selected_projects:
             st.session_state[tab + "_selected_projects"] = selected_projects + [selected_id]
             
         st.session_state[tab + "_rerun"] = 1
         
-        st.experimental_rerun()    
-    else:
-        if not project_details_hidden:
-            display_project_details(df.iloc[selected_row_index])
-            if nav_buttons:
-                display_navigation_buttons(tab, len(df))
+        # Rerun to have selection displayed
+        st.experimental_rerun()   
+        
+    elif not project_details_hidden:
+        display_project_details(df.iloc[selected_row_index])
+        if nav_buttons:
+            display_navigation_buttons(tab, len(df))
 
 
 def update_annotation(project_id, annotation):
     update = f"""
-            UPDATE "{gsheet_url_proj}"
-            SET {annot_col} = "{annotation}"
-            WHERE {acc_col} = "{project_id}"
+            UPDATE "{GSHEET_URL_PROJ}"
+            SET {ANNOT_COL} = "{annotation}"
+            WHERE {ACC_COL} = "{project_id}"
             """
     connection.execute(update)
     
 def update_to_annotate(project_id, to_annotate):
     update = f"""
-            UPDATE "{gsheet_url_proj}"
-            SET {learn_col} = "{to_annotate}"
-            WHERE {acc_col} = "{project_id}"
+            UPDATE "{GSHEET_URL_PROJ}"
+            SET {LEARN_COL} = "{to_annotate}"
+            WHERE {ACC_COL} = "{project_id}"
             """
     connection.execute(update)
     
 def update_predicted(project_id, predicted):
     update = f"""
-            UPDATE "{gsheet_url_proj}"
-            SET {predict_col} = "{predicted}"
-            WHERE {acc_col} = "{project_id}"
+            UPDATE "{GSHEET_URL_PROJ}"
+            SET {PREDICT_COL} = "{predicted}"
+            WHERE {ACC_COL} = "{project_id}"
             """
     connection.execute(update)
     
 def clear_to_annotate():
     update = f"""
-            UPDATE "{gsheet_url_proj}"
-            SET {learn_col} = "{NOT_TO_ANNOTATE}"
-            WHERE {learn_col} != "{NOT_TO_ANNOTATE}"
+            UPDATE "{GSHEET_URL_PROJ}"
+            SET {LEARN_COL} = "{NOT_TO_ANNOTATE}"
+            WHERE {LEARN_COL} != "{NOT_TO_ANNOTATE}"
             """
     connection.execute(update)
     
 def insert_annotation(values):
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
     insert = f''' 
-            INSERT INTO "{gsheet_url_proj}" ({", ".join(project_columns)})
+            INSERT INTO "{GSHEET_URL_PROJ}" ({", ".join(project_columns)})
             VALUES {values_str}
             '''
     connection.execute(insert)
@@ -330,7 +349,7 @@ def insert_annotation(values):
 def insert_publication(values):
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
     insert = f''' 
-            INSERT INTO "{gsheet_url_pub}" ({", ".join(pub_columns)})
+            INSERT INTO "{GSHEET_URL_PUB}" ({", ".join(pub_columns)})
             VALUES {values_str}
             '''
     connection.execute(insert)
@@ -338,26 +357,26 @@ def insert_publication(values):
  
 def add_to_dataset(tab, df, new_pub_df, project_ids=None):
     if project_ids:
-        df = df[df[acc_col].isin(project_ids)]
+        df = df[df[ACC_COL].isin(project_ids)]
         
     for i, project in pd.DataFrame(df).iterrows():
-        if project[acc_col] not in project_df[acc_col].unique():
+        if project[ACC_COL] not in project_df[ACC_COL].unique():
             project_df.loc[len(project_df.index)] = project.tolist()
             insert_annotation(project.fillna(value='').tolist())
             
-            publications = project[pub_col]
+            publications = project[PUB_COL]
             if publications and new_pub_df is not None:
                 for pmid in publications.split(DELIMITER):
-                    if pmid in new_pub_df[pmid_col].unique() and pmid not in pub_df[pmid_col].unique():
-                        pub_values = new_pub_df.loc[new_pub_df[pmid_col] == pmid].squeeze()
+                    if pmid in new_pub_df[PMID_COL].unique() and pmid not in pub_df[PMID_COL].unique():
+                        pub_values = new_pub_df.loc[new_pub_df[PMID_COL] == pmid].squeeze()
                         insert_publication(pub_values.tolist())
                         pub_df.loc[len(pub_df)] = pub_values
                         
             # Display update
             api_project_df.drop(i, axis=0, inplace=True)
             selected_projects = st.session_state.get(tab + "_selected_projects", [])
-            if project[acc_col] in selected_projects:
-                selected_projects.remove(project[acc_col])
+            if project[ACC_COL] in selected_projects:
+                selected_projects.remove(project[ACC_COL])
                 st.session_state[tab + "_selected_projects"] = selected_projects
                 
     st.session_state[tab + "_selected_row_index"] = 0
@@ -368,24 +387,24 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
     col1, col2, col3 = st.columns(3)
     
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
+    project_id = df.iloc[selected_row_index][ACC_COL]
     selected_projects = st.session_state.get(tab + "_selected_projects", [])
     
     with st.form(key=(tab + "_add_form")):
-        add_selection = st.multiselect("Add selection", df[acc_col], default=selected_projects, label_visibility="collapsed", key=(tab + "_add_selection"))
+        add_selection = st.multiselect("Add selection", df[ACC_COL], default=selected_projects, label_visibility="collapsed", key=(tab + "_add_selection"))
         
         # Buttons as close as possible without line-breaks
         col1, col2 = st.columns([0.818, 0.182])
         with col1:
             st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
         with col2:
-            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df, df[acc_col].tolist()))
+            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df, df[ACC_COL].tolist()))
         
 
 
 def get_project_labels(project_id):
-    if project_id in project_df[acc_col].unique():
-        project_labels = project_df[project_df[acc_col] == project_id][annot_col].item()
+    if project_id in project_df[ACC_COL].unique():
+        project_labels = project_df[project_df[ACC_COL] == project_id][ANNOT_COL].item()
         if project_labels:
             return project_labels.split(DELIMITER)
     return []
@@ -393,26 +412,26 @@ def get_project_labels(project_id):
 
 def update_labels(tab, df, new_pub_df=None):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
+    project_id = df.iloc[selected_row_index][ACC_COL]
     
     existing = st.session_state.get(tab + "_labels", "")
     new = st.session_state.get(tab + "_new", "")
     updated_labels = (set(existing) | {n.strip() for n in new.split(",")}) - {""}
     updated_labels_str = DELIMITER.join(sorted(list(updated_labels)))
     
-    if project_id in project_df[acc_col].unique():
+    if project_id in project_df[ACC_COL].unique():
         original_labels = get_project_labels(project_id)
         if updated_labels ^ set(original_labels):
             update_annotation(project_id, updated_labels_str)
             
             if updated_labels_str:
-                project_df.loc[project_df[acc_col] == project_id, annot_col] = updated_labels_str
+                project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = updated_labels_str
                 
                 # So that selected row still within bounds
-                if project_df.loc[project_df[acc_col] == project_id, learn_col].item() == True:
-                    st.session_state[predict_tab_name + "_selected_row_index"] = 0
+                if project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL].item() == True:
+                    st.session_state[TAB_PREDICT + "_selected_row_index"] = 0
             else:
-                project_df.loc[project_df[acc_col] == project_id, annot_col] = None
+                project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = None
     else:
         add_to_dataset(df.iloc[selected_row_index], new_pub_df)
             
@@ -423,7 +442,7 @@ def update_labels(tab, df, new_pub_df=None):
 def get_label_options(project_df):
     label_options = set()
     if not project_df.empty:
-        for annotation in project_df[annot_col]:
+        for annotation in project_df[ANNOT_COL]:
             if annotation is not None:
                 label_options.update(set(annotation.split(DELIMITER)))
         label_options = sorted(list(label_options))
@@ -432,7 +451,7 @@ def get_label_options(project_df):
     
 def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][acc_col]
+    project_id = df.iloc[selected_row_index][ACC_COL]
     
     label_options = get_label_options(project_df)
     original_labels = get_project_labels(project_id)
@@ -455,10 +474,10 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
         st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df))
         
         
-@st.cache_resource(show_spinner=checking_msg)
+@st.cache_resource(show_spinner=False)
 def get_label_matrix(df):
     labels = set()
-    for annotation in df[annot_col]:
+    for annotation in df[ANNOT_COL]:
         if annotation is not None:
             labels.update(set(annotation.split(DELIMITER)))
     
@@ -471,28 +490,28 @@ def get_label_matrix(df):
         i += 1
     
     y_labelled = np.zeros((len(df), len(labels)))
-    for i, annotation in enumerate(df[annot_col]):
+    for i, annotation in enumerate(df[ANNOT_COL]):
         if annotation is not None:
             for label in annotation.split(DELIMITER):
                 y_labelled[i, label_to_index[label]] = 1
             
     return y_labelled, label_to_index, index_to_label
  
-@st.cache_resource(show_spinner=checking_msg) 
+@st.cache_resource(show_spinner=False) 
 def get_sample_matrix(df, pub_df):
     X_labelled = []
     for i, project in df.iterrows():
         text = " ".join([field for field in project[text_columns] if field is not None])
-        if project[pub_col]:
-            for pmid in project[pub_col].split(DELIMITER):
-                text += " " + " ".join([field for field in pub_df.loc[pub_df[pmid_col] == pmid].iloc[0] if field is not None])
+        if project[PUB_COL]:
+            for pmid in project[PUB_COL].split(DELIMITER):
+                text += " " + " ".join([field for field in pub_df.loc[pub_df[PMID_COL] == pmid].iloc[0] if field is not None])
         X_labelled.append(text)
     return X_labelled
  
 @st.cache_data(show_spinner="Checking dataset...") 
 def check_dataset(project_df):
-    unlabelled_df = project_df[project_df[annot_col].isnull()]
-    labelled_df = project_df[project_df[annot_col].notnull()]
+    unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
+    labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     y_labelled, label_to_index, index_to_label = get_label_matrix(labelled_df)
     
     label_sums = np.sum(y_labelled, axis=0)
@@ -521,72 +540,72 @@ def int_column(col):
 @st.cache_data(show_spinner="Processing predictions...")
 def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     labels = np.array(labels)
-    unlabelled_df = project_df[project_df[annot_col].isnull()]
+    unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     
-    for i, project_id in enumerate(unlabelled_df[acc_col]):
+    for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
-        if predicted_str != project_df.loc[project_df[acc_col] == project_id, predict_col].item():
+        if predicted_str != project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item():
             update_predicted(project_id, predicted_str)
-            project_df.loc[project_df[acc_col] == project_id, predict_col] = predicted_str
+            project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
         
     if to_annotate:
         clear_to_annotate()
-        project_df.loc[project_df[learn_col] != NOT_TO_ANNOTATE, learn_col] = NOT_TO_ANNOTATE
+        project_df.loc[project_df[LEARN_COL] != NOT_TO_ANNOTATE, LEARN_COL] = NOT_TO_ANNOTATE
         
         learn_df = unlabelled_df.iloc[to_annotate, :]
-        for i, project_id in enumerate(learn_df[acc_col]):
+        for i, project_id in enumerate(learn_df[ACC_COL]):
             update_to_annotate(project_id, str(i+1))
-            project_df.loc[project_df[acc_col] == project_id, learn_col] = str(i+1)
+            project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = str(i+1)
 
 
-st.button("&circlearrowright;", key="reload_tab") 
+st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
-annotate_tab, search_tab, predict_tab = st.tabs(tab_names)
+annotate, search, predict = st.tabs(tab_names)
 
 connection = connect_gsheets_api()
-project_df = load_data(gsheet_url_proj, project_columns)
-pub_df = load_data(gsheet_url_pub, pub_columns)
+project_df = load_data(GSHEET_URL_PROJ, project_columns)
+pub_df = load_data(GSHEET_URL_PUB, pub_columns)
     
-with annotate_tab:
+with annotate:
     st.header("Annotate projects")
     annotate_df = project_df
 
     if not project_df.empty:
-        search_terms = display_search_feature(annot_tab_name)
+        find_terms = display_search_feature(TAB_ANNOTATE)
         
-        if search_terms:   
-            search_df = local_search(search_terms, project_df)
+        if find_terms:   
+            search_df = local_search(find_terms, project_df)
             if search_df is not None and not search_df.empty:
-                st.write(f"Results for '{search_terms}':")
+                st.write(f"Results for '{find_terms}':")
                 annotate_df = search_df
             else:
-                st.write(f"No results for '{search_terms}'. All projects:")
+                st.write(f"No results for '{find_terms}'. All projects:")
         
         if not annotate_df.empty:
-            display_interactive_grid(annot_tab_name, annotate_df, annot_columns)
-            display_annotation_feature(annot_tab_name, annotate_df)
+            display_interactive_grid(TAB_ANNOTATE, annotate_df, annot_columns)
+            display_annotation_feature(TAB_ANNOTATE, annotate_df)
         
     else:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
     
 
-with search_tab:
+with search:
     st.header("Search BioProject")
     
-    api_terms = display_search_feature(search_tab_name)
+    api_terms = display_search_feature(TAB_SEARCH)
     if api_terms:
         api_project_df, api_pub_df, found = api_search(api_terms)
         if api_project_df is not None and not api_project_df.empty:
             st.write(f"Results for '{api_terms}':")
-            display_interactive_grid(search_tab_name, api_project_df, search_columns)
-            display_add_to_dataset_feature(search_tab_name, api_project_df, api_pub_df)
+            display_interactive_grid(TAB_SEARCH, api_project_df, search_columns)
+            display_add_to_dataset_feature(TAB_SEARCH, api_project_df, api_pub_df)
         elif found:
             st.write(f"No results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
-with predict_tab:
+with predict:
     st.header("Predict annotations")
     
     message = st.empty()
@@ -598,17 +617,17 @@ with predict_tab:
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
-            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci = predict(X_labelled, y_labelled, X_unlabelled)
+            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, y_labelled, X_unlabelled)
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci
             
             # Columns irrelevant to method cacheing dropped
-            df = project_df.drop([predict_col, learn_col], axis=1)
+            df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
             process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
             
             st.session_state.new_predictions = True
     
-    predict_df = project_df[project_df[predict_col].notnull()]
+    predict_df = project_df[project_df[PREDICT_COL].notnull()]
     if predict_df is not None and not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted labels")
@@ -620,59 +639,49 @@ with predict_tab:
             st.write(f"Macro-f1: {np.mean(f1_macro_ci):.3f}, with 95% confidence interval ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")
         else:
             st.header("Previously predicted labels")
-        display_interactive_grid(predict_tab_name, predict_df, predict_columns, nav_buttons=False)
+        display_interactive_grid(TAB_PREDICT, predict_df, predict_columns, nav_buttons=False)
     
     learn_section_name = "Learn"
-    learn_df = project_df[int_column(project_df[learn_col]) > 0]    
+    learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]    
     if learn_df is not None and not learn_df.empty:
         st.header("Improve predictions")
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
-        learn_df = learn_df.sort_values(learn_col, axis=0, ignore_index=True, key=lambda col: int_column(col))
+        learn_df = learn_df.sort_values(LEARN_COL, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid(learn_section_name, learn_df, annot_columns)
         display_annotation_feature(learn_section_name, learn_df)
         
 import streamlit.components.v1 as components
 
 components.html(
-    """
+    f"""
         <script>
-            window.onload = setTimeout(function () {
-                const doc = window.parent.document;
-                tabs = doc.querySelectorAll('button[role="tab"]');
-                buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
-                reloadButton = buttons.find(el => el.innerText === "↻");
+            function addTabReruns () {{
+                let doc = window.parent.document;
+                let buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
+                let reloadButton = buttons.find(el => el.innerText === "{ reload_btn }");
+
+                let tabs = doc.querySelectorAll('button[role="tab"]');
                 
-                for (let i = 0; i < tabs.length; i++) {
-                    tabs[i].addEventListener("click", function () {
+                for (let i = 0; i < tabs.length; i++) {{
+                    tabs[i].addEventListener("click", function () {{
                         reloadButton.click();
-                    });
-                }
-
-                aggridFrames = doc.querySelectorAll('iframe[title="st_aggrid.agGrid"]');
-
-                for (let i = 0; i < aggridFrames.length; i++) {
-                    let aggridDoc = aggridFrames[i].contentWindow.document;
-                    let gridArrows = aggridDoc.getElementsByClassName("ag-paging-button");
-                    
-                    for (let j = 0; j < gridArrows.length; j++) {
-                        gridArrows[j].addEventListener("click", function () {
-                            reloadButton.click();
-                        });
-                    }
-                }
+                    }});
+                }}
+            }}
+            
+            function positionPreviousButton () {{
+                let doc = window.parent.document;
+                let buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
+                let previousButtons = buttons.filter(el => el.innerText === "{ prev_btn }");
                 
-                var timer = setInterval(function(){ 
-                    let docFresh = window.parent.document;
-                    let buttonsFresh = Array.from(docFresh.querySelectorAll('button[kind="secondary"]'));
-                    let previousButtons = buttonsFresh.filter(el => el.innerText === "Previous");
-                    
-                    for (let i = 0; i < previousButtons.length; i++) {
-                        previousButtons[i].style.float = "left";
-                    }
-                }, 500);
-                
-            }, 1000);
+                for (let i = 0; i < previousButtons.length; i++) {{
+                    previousButtons[i].style.float = "left";
+                }}
+            }} 
+            
+            window.onload = addTabReruns;
+            setInterval(positionPreviousButton, 500);
         </script>
     """,
     height=0, width=0

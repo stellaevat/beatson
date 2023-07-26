@@ -15,6 +15,7 @@ nlp = spacy.load("en_core_sci_sm")
 LABELLED, UNLABELLED, TEST = 0.6, 0.2, 0.2
 ITERATIONS = 10
 SELECTION = 10
+
 metrics = {'accuracy': accuracy_score,
            'precision': precision_score,
            'recall': recall_score,
@@ -114,7 +115,7 @@ def binmin_proba_query_selection(clf, y_probabilities):
 # Prediction
 
 @st.cache_data(show_spinner="Running prediction algorithm...")
-def predict(X_labelled, y_labelled, X_unlabelled):
+def get_predictions(X_labelled, y_labelled, X_unlabelled):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
     X_unlabelled = vectorizer.transform(X_unlabelled)

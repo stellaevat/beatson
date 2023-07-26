@@ -6,12 +6,12 @@ from Bio import Entrez
 from collections import defaultdict
 from shillelagh.backends.apsw.db import connect
 
-gsheet_url_proj = st.secrets["private_gsheets_url_proj"]
-gsheet_url_pub = st.secrets["private_gsheets_url_pub"]
+GSHEET_URL_PROJ = st.secrets["private_gsheets_url_proj"]
+GSHEET_URL_PUB = st.secrets["private_gsheets_url_pub"]
 
 Entrez.email = "stell.aeva@hotmail.com"
-project_db = "bioproject"
-pub_db = "pubmed"
+PROJECT_DB = "bioproject"
+PUB_DB = "pubmed"
 
 DELIMITER = ", "
 NOT_TO_LABEL = "0"
@@ -202,7 +202,7 @@ def retrieve_projects(ids):
     all_pub_ids = set()
     
     if ids:
-        project_dict = efetch(project_db, ids)
+        project_dict = efetch(PROJECT_DB, ids)
         
         if (projects := project_dict.get("DocumentSummary")):
             for project in projects:
@@ -215,7 +215,7 @@ def retrieve_projects(ids):
                         all_pub_ids.update(pub_ids.split(DELIMITER))
             
             if all_pub_ids:
-                pub_dict = efetch(pub_db, all_pub_ids)
+                pub_dict = efetch(PUB_DB, all_pub_ids)
                 
                 if (publications := pub_dict.get("PubmedArticle")):
                     for pub in publications:
@@ -235,6 +235,6 @@ def retrieve_projects(ids):
     # ids = f.readlines()
 # all_project_data, all_pub_data = retrieve_projects(ids)
 # if all_project_data:
-    # store_data(gsheet_url_proj, all_project_data)
+    # store_data(GSHEET_URL_PROJ, all_project_data)
 # if all_pub_data:
-    # store_data(gsheet_url_pub, all_pub_data)
+    # store_data(GSHEET_URL_PUB, all_pub_data)
