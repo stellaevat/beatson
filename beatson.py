@@ -58,6 +58,8 @@ aggrid_css = {
     ".ag-theme-alpine, .ag-theme-alpine-dark": {"--ag-font-size": "12px;"},
     ".ag-cell": {"padding": "0px 12px;"},
 }
+
+markdown_translation = str.maketrans({char : '\\' + char for char in r'\`*_{}[]()#+-.!:><&'})
     
 streamlit_css = r'''
     <style>
@@ -166,6 +168,8 @@ def go_to_previous(tab, selected_row_index):
     st.session_state[tab + "_selected_row_index"] = selected_row_index - 1
     
 def display_project_details(project):
+    project = pd.Series({k : v.translate(markdown_translation) if v else v for (k, v) in project.to_dict().items()})
+    
     st.write("")
     st.subheader(f"{project[TITLE_COL] if project[TITLE_COL] else project[NAME_COL] if project[NAME_COL] else project[ACC_COL]}")
     
