@@ -115,7 +115,7 @@ def binmin_proba_query_selection(clf, y_probabilities):
 # Prediction
 
 @st.cache_data(show_spinner="Running prediction algorithm...")
-def get_predictions(X_labelled, y_labelled, X_unlabelled):
+def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba"):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
     X_unlabelled = vectorizer.transform(X_unlabelled)
@@ -137,6 +137,9 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled):
     y_probabilities = clf.predict_proba(X_unlabelled)
     y_predicted = np.where(y_probabilities >= 0.5, 1, 0)
     
-    # to_annotate = binmin_proba_query_selection(clf, y_probabilities).tolist()
-    to_annotate = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
+    if algorithm == "bin_min_proba":
+        to_annotate = binmin_proba_query_selection(clf, y_probabilities).tolist()
+    else:
+        to_annotate = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
+        
     return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci

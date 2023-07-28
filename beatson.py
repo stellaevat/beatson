@@ -97,7 +97,8 @@ def esearch(database, terms):
     if not terms:
         return None
     handle = Entrez.esearch(db=database, term=terms, retmax=RETMAX, idtype=IDTYPE)
-    ids = Entrez.read(handle)["IdList"]
+    data_dict = Entrez.read(handle)
+    ids = data_dict["IdList"]
     return ids
 
  
@@ -108,7 +109,7 @@ def api_search(search_terms):
     
     # TODO: find synonyms
     
-    ids = esearch(PROJECT_DB, "+OR+".join(search_terms))
+    ids = esearch(PROJECT_DB, " OR ".join(search_terms))
     found = True if ids else False
     
     # Check both uid/acc columns because esearch unreliable
