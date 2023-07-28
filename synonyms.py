@@ -1,7 +1,11 @@
+import streamlit as st
 from collections import defaultdict
 
-wordlists = ["terms_cancers.tsv", "terms_conflicting.tsv", "terms_drugs.tsv", "terms_genes.tsv", "terms_proteins.tsv", "terms_variants.tsv",]
+loading_msg = "Loading project data..."
 
+wordlists = ["terms_cancers.tsv", "terms_conflicting.tsv", "terms_drugs.tsv", "terms_genes.tsv", "terms_proteins.tsv", "terms_variants.tsv"]
+
+@st.cache_data(show_spinner=False)
 def get_terms_and_synonyms(wordlist):
   terms = set()
   with open(wordlist, encoding="utf8") as f:
@@ -10,20 +14,20 @@ def get_terms_and_synonyms(wordlist):
       terms.update(set(group.split("|")))
   return terms, synonyms
 
+@st.cache_data(show_spinner=False)
 def get_vocabulary_and_index(terms):
   vocabulary = {}
   index = {}
-  counter = 0
-  for term in terms:
-      vocabulary[term] = counter
-      index[counter] = term
-      counter += 1
+  for i, term in enumerate(terms):
+      vocabulary[term] = i
+      index[i] = term
   return vocabulary, index
 
+@st.cache_data(show_spinner=loading_msg)
 def get_synonym_graph(wordlists=wordlists):
   all_terms = set()
   all_synonyms = []
-  synonym_graph = defaultdict(list)
+  synonym_graph = defaultdict(set)
 
   for wordlist in wordlists:
     terms, synonyms = get_terms_and_synonyms("wordlists/" + wordlist)
@@ -38,6 +42,6 @@ def get_synonym_graph(wordlists=wordlists):
       for source in group:
         if target != source:
           # TODO: If target contains source maybe don't need to include
-          synonym_graph[vocabulary[source]].append(vocabulary[target])
+          synonym_graph[vocabulary[source]].add(vocabulary[target])
   
   return synonym_graph, vocabulary, index

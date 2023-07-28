@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
+from synonyms import get_synonym_graph
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
@@ -107,20 +108,27 @@ def esearch(database, terms):
     ids = data_dict["IdList"]
     return ids
 
+@st.cache_resource(show_spinner=False)
+def get_terms_with_synonyms(search_terms):
+    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
+    
+    synonyms = set()
+    for term in search_terms:
+        if term in synonym_vocab:
+            term_index = synonym_vocab[term]
+            synonyms.update(synonym_graph[term_index])
+            
+    terms_with_synonyms = search_terms | {synonym_index[index] for index in synonyms}
+    return terms_with_synonyms
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms):
-    search_df, search_pub_df = None, None
-    search_terms = [term.strip().lower() for term in search_terms.split() if term.strip()]
-    
-    # TODO: find synonyms
+    search_terms = get_terms_with_synonyms(search_terms)
     
     ids = esearch(PROJECT_DB, " OR ".join(search_terms))
-    found = True if ids else False
-    
-    # Check both uid/acc columns because esearch unreliable
-    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values]
+    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values] # either uid or acc because esearch unreliable
 
+    search_df, search_pub_df = None, None
     all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
     if all_project_data:
         search_df = pd.DataFrame(all_project_data)
@@ -128,16 +136,15 @@ def api_search(search_terms):
         if all_pub_data:
             search_pub_df = pd.DataFrame(all_pub_data)
             search_pub_df.columns = pub_columns
-                
+    
+    found = True if ids else False    
     return search_df, search_pub_df, found
             
             
 @st.cache_resource(show_spinner=search_msg)
 def local_search(search_terms, df):
-    search_terms = [term.strip() for term in search_terms.split() if term.strip()]
+    search_terms = get_terms_with_synonyms(search_terms)
     search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
-    
-    # TODO: find synonyms
     
     raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
     total_counts = np.sum(raw_counts, axis=1)
@@ -586,6 +593,7 @@ connection = connect_gsheets_api()
 project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
 pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
 metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
+synonym_graph, synonym_vocab, synonym_index = get_synonym_graph()
     
 with annotate:
     st.header("Annotate projects")
