@@ -106,23 +106,10 @@ def esearch(database, terms):
     data_dict = Entrez.read(handle)
     ids = data_dict["IdList"]
     return ids
-
-@st.cache_resource(show_spinner=False)
-def get_terms_with_synonyms(search_terms):
-    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
-    
-    synonyms = set()
-    for term in search_terms:
-        if term in synonym_vocab:
-            term_index = synonym_vocab[term]
-            synonyms.update(synonym_graph[term_index])
-            
-    terms_with_synonyms = search_terms | {synonym_index[index] for index in synonyms}
-    return terms_with_synonyms
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms):
-    search_terms = term.strip().lower() for term in search_terms.split() if term.strip()}
+    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
     
     ids = esearch(PROJECT_DB, " OR ".join(search_terms))
     ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values] # either uid or acc because esearch unreliable
@@ -142,7 +129,7 @@ def api_search(search_terms):
             
 @st.cache_resource(show_spinner=search_msg)
 def local_search(search_terms, df):
-    search_terms = term.strip().lower() for term in search_terms.split() if term.strip()}
+    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
     search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
     
     raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
