@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import spacy
-from tqdm import tqdm
 from scipy import stats
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.multiclass import OneVsRestClassifier
@@ -12,9 +11,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 nlp = spacy.load("en_core_sci_sm")
 
-LABELLED, UNLABELLED, TEST = 0.6, 0.2, 0.2
-ITERATIONS = 10
-SELECTION = 10
+SUGGESTIONS = 10
 
 metrics = {'accuracy': accuracy_score,
            'precision': precision_score,
@@ -74,7 +71,7 @@ def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
+    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
     return to_annotate
   
 # Simplified MMC Algorithm 
@@ -85,7 +82,7 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
     y_predicted[y_predicted < 1] = -1
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
+    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
     return to_annotate
     
 def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
@@ -93,7 +90,7 @@ def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
     y_pred = np.where(y_predicted < 1, -1, 1)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_pred * y_dec)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SELECTION] if SELECTION < len(expected_loss_reduction_score) else expected_loss_reduction_score
+    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
     return to_annotate
   
 # BinMin Algorithm
@@ -101,13 +98,13 @@ def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
 def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
-    to_annotate = most_uncertain_label_score[:SELECTION] if SELECTION < len(most_uncertain_label_score) else most_uncertain_label_score
+    to_annotate = most_uncertain_label_score[:SUGGESTIONS] if SUGGESTIONS < len(most_uncertain_label_score) else most_uncertain_label_score
     return to_annotate
     
     
 def binmin_proba_query_selection(clf, y_probabilities):
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_probabilities-0.5), axis=1))
-    to_annotate = most_uncertain_label_score[:SELECTION] if SELECTION < len(most_uncertain_label_score) else most_uncertain_label_score
+    to_annotate = most_uncertain_label_score[:SUGGESTIONS] if SUGGESTIONS < len(most_uncertain_label_score) else most_uncertain_label_score
     return to_annotate
 
 
@@ -125,7 +122,7 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     
     folds = 5
     scoring = ["f1_micro", "f1_macro"]
-    scores = cross_validate(clf_val, X_labelled, y_labelled, scoring=scoring, cv=folds)
+    scores = cross_validate(clf_val, X_labelled, y_labelled, scoring=scoring, cv=folds, error_score=0)
     
     f1_micros = scores["test_f1_micro"]
     f1_macros = scores["test_f1_macro"]
@@ -142,4 +139,4 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     else:
         to_annotate = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
         
-    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci
+    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, None

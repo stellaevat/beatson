@@ -5,6 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
+from datetime import date
 import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
@@ -15,6 +16,7 @@ st.set_page_config(page_title="BioProject Annotation")
 
 GSHEET_URL_PROJ = st.secrets["private_gsheets_url_proj"]
 GSHEET_URL_PUB = st.secrets["private_gsheets_url_pub"]
+GSHEET_URL_METRICS = st.secrets["private_gsheets_url_metrics"]
 
 Entrez.email = "stell.aeva@hotmail.com"
 PROJECT_DB = "bioproject"
@@ -37,6 +39,8 @@ UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, 
 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
+
+metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro", "Confident_Percentage"]
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL]
 search_columns = [ACC_COL, TITLE_COL]
@@ -84,12 +88,14 @@ def connect_gsheets_api():
     return connection
     
 @st.cache_resource(show_spinner=loading_msg)
-def load_data(gsheet_url, _columns):
+def load_sheet(gsheet_url, columns):
     query = f'SELECT * FROM "{gsheet_url}"'
     executed_query = connection.execute(query)
     df = pd.DataFrame(executed_query.fetchall())
     if not df.empty:
-        df.columns = _columns
+        df.columns = columns
+    else:
+        df = pd.DataFrame(columns=columns)
     return df
     
 @st.cache_data(show_spinner=False)
@@ -273,7 +279,6 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
     grid = AgGrid(
         df[columns].replace('', None).fillna(value=PLACEHOLDER), 
         gridOptions=grid_options,
-        width="100%",
         theme="alpine",
         update_mode=(GridUpdateMode.SELECTION_CHANGED if selection_mode=="single" else GridUpdateMode.NO_UPDATE),
         custom_css=aggrid_css,
@@ -331,7 +336,7 @@ def update_sheet(project_id, value, column, sheet=GSHEET_URL_PROJ):
         WHERE {ACC_COL} = "{project_id}"
     """
     connection.execute(update)
-    
+
 def insert_sheet(values, columns=project_columns, sheet=GSHEET_URL_PROJ):
     values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
     insert = f"""
@@ -349,10 +354,7 @@ def clear_sheet_column(column, sheet=GSHEET_URL_PROJ):
     connection.execute(clear)
 
  
-def add_to_dataset(tab, df, new_pub_df, project_ids=None):
-    if project_ids:
-        df = df[df[ACC_COL].isin(project_ids)]
-        
+def add_to_dataset(tab, df, new_pub_df):
     for i, project in pd.DataFrame(df).iterrows():
         if project[ACC_COL] not in project_df[ACC_COL].unique():
             project_df.loc[len(project_df.index)] = project.tolist()
@@ -367,7 +369,7 @@ def add_to_dataset(tab, df, new_pub_df, project_ids=None):
                         pub_df.loc[len(pub_df)] = pub_values
                         
             # Display update
-            api_project_df.drop(i, axis=0, inplace=True)
+            api_df.drop(i, axis=0, inplace=True)
             selected_projects = st.session_state.get(tab + "_selected_projects", [])
             if project[ACC_COL] in selected_projects:
                 selected_projects.remove(project[ACC_COL])
@@ -390,9 +392,9 @@ def display_add_to_dataset_feature(tab, df, new_pub_df):
         # Buttons as close as possible without line-breaks
         col1, col2 = st.columns([0.818, 0.182])
         with col1:
-            st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df, new_pub_df, add_selection))
+            st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df[df[ACC_COL].isin(add_selection)], new_pub_df))
         with col2:
-            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df, df[ACC_COL].tolist()))
+            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df))
         
 
 
@@ -581,8 +583,9 @@ st.title("BioProject Annotation")
 annotate, search, predict = st.tabs(tab_names)
 
 connection = connect_gsheets_api()
-project_df = load_data(GSHEET_URL_PROJ, project_columns)
-pub_df = load_data(GSHEET_URL_PUB, pub_columns)
+project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
+pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
+metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
     
 with annotate:
     st.header("Annotate projects")
@@ -592,10 +595,10 @@ with annotate:
         find_terms = display_search_feature(TAB_ANNOTATE)
         
         if find_terms:   
-            search_df = local_search(find_terms, project_df)
-            if search_df is not None and not search_df.empty:
+            find_df = local_search(find_terms, project_df)
+            if find_df is not None and not find_df.empty:
                 st.write(f"Results for '{find_terms}':")
-                annotate_df = search_df
+                annotate_df = find_df
             else:
                 st.write(f"No results for '{find_terms}'. All projects:")
         
@@ -612,11 +615,11 @@ with search:
     
     api_terms = display_search_feature(TAB_SEARCH)
     if api_terms:
-        api_project_df, api_pub_df, found = api_search(api_terms)
-        if api_project_df is not None and not api_project_df.empty:
+        api_df, api_pub_df, found = api_search(api_terms)
+        if api_df is not None and not api_df.empty:
             st.write(f"Results for '{api_terms}':")
-            display_interactive_grid(TAB_SEARCH, api_project_df, search_columns)
-            display_add_to_dataset_feature(TAB_SEARCH, api_project_df, api_pub_df)
+            display_interactive_grid(TAB_SEARCH, api_df, search_columns)
+            display_add_to_dataset_feature(TAB_SEARCH, api_df, api_pub_df)
         elif found:
             st.write(f"No results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
         else:
@@ -632,7 +635,10 @@ with predict:
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
-            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, y_labelled, X_unlabelled)
+            training_size = len(X_labelled)
+            
+            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, confident_pct = get_predictions(X_labelled, y_labelled, X_unlabelled)
+
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci
             
@@ -640,10 +646,15 @@ with predict:
             df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
             process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
             
+            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci), confident_pct])
+            if metric_df.empty or (metric_df == metric_row).all(1).any():
+                insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
+                metric_df.loc[len(metric_df)] = metric_row
+
             st.session_state.new_predictions = True
     
     predict_df = project_df[project_df[PREDICT_COL].notnull()]
-    if predict_df is not None and not predict_df.empty:
+    if not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted")
             
@@ -658,7 +669,7 @@ with predict:
     
     learn_section_name = "Learn"
     learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]    
-    if learn_df is not None and not learn_df.empty:
+    if not learn_df.empty:
         st.header("Improve predictions")
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
