@@ -10,7 +10,6 @@ import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from dataset import retrieve_projects
-from synonyms import get_synonym_graph
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
@@ -123,7 +122,7 @@ def get_terms_with_synonyms(search_terms):
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms):
-    search_terms = get_terms_with_synonyms(search_terms)
+    search_terms = term.strip().lower() for term in search_terms.split() if term.strip()}
     
     ids = esearch(PROJECT_DB, " OR ".join(search_terms))
     ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values] # either uid or acc because esearch unreliable
@@ -143,7 +142,7 @@ def api_search(search_terms):
             
 @st.cache_resource(show_spinner=search_msg)
 def local_search(search_terms, df):
-    search_terms = get_terms_with_synonyms(search_terms)
+    search_terms = term.strip().lower() for term in search_terms.split() if term.strip()}
     search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
     
     raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
@@ -593,7 +592,6 @@ connection = connect_gsheets_api()
 project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
 pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
 metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
-synonym_graph, synonym_vocab, synonym_index = get_synonym_graph()
     
 with annotate:
     st.header("Annotate projects")
