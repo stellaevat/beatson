@@ -47,11 +47,13 @@ search_columns = [ACC_COL, TITLE_COL]
 predict_columns = [ACC_COL, TITLE_COL, PREDICT_COL]
 detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
 text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
+export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
 
 search_msg = "Getting search results..."
 loading_msg = "Loading project data..."
 
 reload_btn = "↻"
+export_btn = "Export to CSV"
 next_btn = "Next"
 prev_btn = "Previous"
 
@@ -284,10 +286,16 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
     previous_page = st.session_state.get(tab + "_starting_page", 0)
     project_details_hidden = st.session_state.get(tab + "_project_details_hidden", True)
     
-    if project_details_hidden:
-        st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
-    else:
-        st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button("Export to CSV", df[export_columns].rename(columns={ANNOT_COL:"Manual_Annotation", PREDICT_COL: "Predicted_Annotation"}).to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
+    with col2:
+        if project_details_hidden:
+            st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
+        else:
+            st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
+        
 
     if rerun:
         if not project_details_hidden:
@@ -570,6 +578,8 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
                     update_sheet(project_id, order, LEARN_COL)
                     project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
             
+def display_export_button(tab):
+    st.download_button("Export to CSV", project_df.to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
     
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
@@ -579,7 +589,7 @@ connection = connect_gsheets_api()
 project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
 pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
 metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
-    
+
 with annotate:
     st.header("Annotate projects")
     annotate_df = project_df
@@ -596,6 +606,7 @@ with annotate:
                 st.write(f"No results for '{find_terms}'. All projects:")
         
         if not annotate_df.empty:
+            # display_export_button(TAB_ANNOTATE)
             display_interactive_grid(TAB_ANNOTATE, annotate_df, annot_columns)
             display_annotation_feature(TAB_ANNOTATE, annotate_df)
         
@@ -693,10 +704,20 @@ components.html(
                 let doc = window.parent.document;
                 let buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
                 let previousButtons = buttons.filter(el => el.innerText === "{ prev_btn }");
+                let exportButtons = buttons.filter(el => el.innerText === "{ export_btn }");
                 
                 for (let i = 0; i < previousButtons.length; i++) {{
                     previousButtons[i].style.float = "left";
                 }}
+                
+                for (let i = 0; i < exportButtons.length; i++) {{
+                    exportButtons[i].style.float = "left";
+                    exportButtons[i].style.backgroundColor = "#4c4c4c";
+                    exportButtons[i].style.borderColor = "#4c4c4c";
+                    exportButtons[i].style.color = "white";
+                }}
+                
+                
             }} 
             
             window.onload = addTabReruns;
