@@ -34,8 +34,8 @@ LABEL_THRESHOLD = 3
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
-project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "To_Annotate"]
-UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, LEARN_COL = project_columns
+project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Probability", "To_Annotate"]
+UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, PROBA_COL, LEARN_COL  = project_columns
 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
@@ -54,6 +54,8 @@ loading_msg = "Loading project data..."
 
 reload_btn = "↻"
 export_btn = "Export to CSV"
+show_btn = "Show details"
+hide_btn = "Hide details"
 next_btn = "Next"
 prev_btn = "Previous"
 
@@ -292,9 +294,9 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         st.download_button("Export to CSV", df[export_columns].rename(columns={ANNOT_COL:"Manual_Annotation", PREDICT_COL: "Predicted_Annotation"}).to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
     with col2:
         if project_details_hidden:
-            st.button("Show details", key=(tab + "_show"), on_click=show_details, args=(tab,))
+            st.button(show_btn, key=(tab + "_show"), on_click=show_details, args=(tab,))
         else:
-            st.button("Hide details", key=(tab + "_hide"), on_click=hide_details, args=(tab,))
+            st.button(hide_btn, key=(tab + "_hide"), on_click=hide_details, args=(tab,))
         
 
     if rerun:
@@ -329,11 +331,11 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
             display_navigation_buttons(tab, len(df))
 
 
-def update_sheet(project_id, value, column, sheet=GSHEET_URL_PROJ):
-    value = f'"{value}"' if value else 'NULL'
+def update_sheet(project_id, column_values_dict, sheet=GSHEET_URL_PROJ):
+    column_values = [f'{col} = "{val}"' if val else f'{col} = NULL' for (col, val) in column_values_dict.items()]
     update = f"""
         UPDATE "{sheet}"
-        SET {column} = {value}
+        SET {", ".join(column_values)}
         WHERE {ACC_COL} = "{project_id}"
     """
     connection.execute(update)
@@ -420,7 +422,7 @@ def update_labels(tab, df, new_pub_df=None):
     if project_id in project_df[ACC_COL].unique():
         original_labels = get_project_labels(project_id)
         if updated_labels ^ set(original_labels):
-            update_sheet(project_id, updated_labels_str, ANNOT_COL)
+            update_sheet(project_id, {ANNOT_COL : updated_labels_str})
             
             if updated_labels_str:
                 project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = updated_labels_str
@@ -542,13 +544,24 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
     for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
-        
+        # Average distance from 0.5 across labels, normalised between 0-1
+        probability = "%.3f" % np.mean(2 * np.abs(y_probabilities[i] - 0.5))
+
         old_prediction = project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item()
         old_prediction = old_prediction if old_prediction else ""
+
+        old_probability = project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item()
+        old_probability = old_probability if old_probability else ""
         
-        if predicted_str != old_prediction:
-            update_sheet(project_id, predicted_str, PREDICT_COL)
-            project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
+        if predicted_str != old_prediction and probability != old_probability:
+            update_sheet(project_id, {PREDICT_COL : predicted_str, PROBA_COL : probability})
+        elif predicted_str != old_prediction:
+            update_sheet(project_id, {PREDICT_COL : predicted_str})
+        elif probability != old_probability:
+            update_sheet(project_id, {PROBA_COL : probability})
+            
+        project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
+        project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL] = probability
         
     if to_annotate:
         old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
@@ -565,10 +578,10 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
             if len(changes) < len(new_order) + 1:
                 for (order, project_id) in differences:
                     if new_order[order] == project_id:
-                        update_sheet(project_id, order, LEARN_COL)
+                        update_sheet(project_id, {LEARN_COL : order})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
                     else:
-                        update_sheet(project_id, None, LEARN_COL)
+                        update_sheet(project_id, {LEARN_COL : None})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = None
             else:
                 clear_sheet_column(LEARN_COL)
@@ -577,6 +590,13 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
                 for order, project_id in new_order.items():
                     update_sheet(project_id, order, LEARN_COL)
                     project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
+                    
+    labelled_df = project_df[project_df[ANNOT_COL].notnull()]
+    for i, project_id in enumerate(labelled_df[ACC_COL]):
+        if project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item():
+            update_sheet(project_id, {PREDICT_COL : None, PROBA_COL : None})
+            project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, PROBA_COL]] = None
+            
             
 def display_export_button(tab):
     st.download_button("Export to CSV", project_df.to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
@@ -625,7 +645,7 @@ with search:
             display_interactive_grid(TAB_SEARCH, api_df, search_columns)
             display_add_to_dataset_feature(TAB_SEARCH, api_df, api_pub_df)
         elif found:
-            st.write(f"No results for '{api_terms}' which are not already in the dataset. Try looking for something else.")
+            st.write(f"No results for '{api_terms}' that are not already in the dataset. Try looking for something else.")
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
@@ -700,15 +720,11 @@ components.html(
                 }}
             }}
             
-            function positionPreviousButton () {{
+            function styleButtons () {{
                 let doc = window.parent.document;
                 let buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
-                let previousButtons = buttons.filter(el => el.innerText === "{ prev_btn }");
                 let exportButtons = buttons.filter(el => el.innerText === "{ export_btn }");
-                
-                for (let i = 0; i < previousButtons.length; i++) {{
-                    previousButtons[i].style.float = "left";
-                }}
+                let previousButtons = buttons.filter(el => el.innerText === "{ prev_btn }");
                 
                 for (let i = 0; i < exportButtons.length; i++) {{
                     exportButtons[i].style.float = "left";
@@ -717,11 +733,13 @@ components.html(
                     exportButtons[i].style.color = "white";
                 }}
                 
-                
+                for (let i = 0; i < previousButtons.length; i++) {{
+                    previousButtons[i].style.float = "left";
+                }}  
             }} 
             
             window.onload = addTabReruns;
-            setInterval(positionPreviousButton, 500);
+            setInterval(styleButtons, 500);
         </script>
     """,
     height=0, width=0

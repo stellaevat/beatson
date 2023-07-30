@@ -19,6 +19,8 @@ RETMODE = "xml"
 ENTREZ_API_CALLS_PS = 3
 GOOGLE_API_CALLS_PM = 60
 
+project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Probability", "To_Annotate"]
+
 style_tags = ["b", "i", "p"]
 
 @st.cache_resource(show_spinner=False)
@@ -150,9 +152,9 @@ def get_project_data(project):
                 pub_list.append(pub_id)
     project_data["PMIDs"] = DELIMITER.join(pub_list)
     
-    project_data["Annotation"] = ""
-    project_data["Predicted"] = ""
-    project_data["To_Annotate"] = ""
+    for column in project_columns:
+        if column not in project_data: 
+            project_data[column] = ""
     
     project_data = clean_text(project_data)
     return project_data
