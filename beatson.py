@@ -113,9 +113,7 @@ def esearch(database, terms):
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms):
-    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
-    
-    ids = esearch(PROJECT_DB, " OR ".join(search_terms))
+    ids = esearch(PROJECT_DB, search_terms)
     ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values] # either uid or acc because esearch unreliable
 
     search_df, search_pub_df = None, None
@@ -134,7 +132,7 @@ def api_search(search_terms):
 @st.cache_resource(show_spinner=search_msg)
 def local_search(search_terms, df):
     search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
-    search_expr = r"(\b(" + "|".join(search_terms) + r")\b)"
+    search_expr = "".join([f"(?=.*{term})" for term in search_terms])
     
     raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
     total_counts = np.sum(raw_counts, axis=1)
@@ -145,7 +143,7 @@ def local_search(search_terms, df):
     return search_df
     
 def display_search_feature(tab):
-    search_terms = st.text_input("Search", label_visibility="collapsed", placeholder="Search", key=(tab + "_search")).strip()
+    search_terms = st.text_input("Search", label_visibility="collapsed", placeholder="Search", autocomplete="on", key=(tab + "_search")).strip()
     st.write("")
     
     if st.session_state.get(tab + "_prev_search", "") != search_terms:
@@ -464,12 +462,12 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
             with col1:
                 labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
             with col2:
-                new = st.text_input("Create new", placeholder="Or create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+                new = st.text_input("Create new", placeholder="Or create new (comma-separated)", label_visibility="collapsed", autocomplete="off", key=(tab + "_new"))
         elif label_options:
             labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
         else:
             labels = ""
-            new = st.text_input("Create new", placeholder="Create new (comma-separated)", label_visibility="collapsed", key=(tab + "_new"))
+            new = st.text_input("Create new", placeholder="Create new (comma-separated)", label_visibility="collapsed", autocomplete="off", key=(tab + "_new"))
 
         st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df))
         
