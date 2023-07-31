@@ -9,7 +9,7 @@ from datetime import date
 import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-from dataset import retrieve_projects
+from populate_dataset import retrieve_projects
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")

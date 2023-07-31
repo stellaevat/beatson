@@ -230,12 +230,13 @@ def retrieve_projects(ids):
     
     return all_project_data, all_pub_data
 
-# connection = connect_gsheets_api()
-# ids = ""
-# with open("random_ids.txt", encoding="utf8") as f:
-    # ids = f.readlines()
-# all_project_data, all_pub_data = retrieve_projects(ids)
-# if all_project_data:
-    # store_data(GSHEET_URL_PROJ, all_project_data)
-# if all_pub_data:
-    # store_data(GSHEET_URL_PUB, all_pub_data)
+if __name__ == '__main__':
+    connection = connect_gsheets_api()
+    ids = ""
+    with open("project_ids.txt", encoding="utf8") as f:
+        ids = f.readlines()
+    all_project_data, all_pub_data = retrieve_projects(ids)
+    if all_project_data:
+        store_data(GSHEET_URL_PROJ, all_project_data)
+    if all_pub_data:
+        store_data(GSHEET_URL_PUB, all_pub_data)
