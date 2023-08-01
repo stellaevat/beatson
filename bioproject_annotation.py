@@ -9,7 +9,7 @@ from datetime import date
 import streamlit.components.v1 as components
 from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-from populate_dataset import retrieve_projects
+from dataset_population import retrieve_projects
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
@@ -80,12 +80,12 @@ css = f"""
 st.markdown(css, unsafe_allow_html=True)
     
 @st.cache_resource(show_spinner=loading_msg)
-def connect_gsheets_api():
+def connect_gsheets_api(service_no):
     connection = connect(
         ":memory:",
         adapter_kwargs = {
             "gsheetsapi": { 
-                "service_account_info":  dict(st.secrets["gcp_service_account"])
+                "service_account_info":  dict(st.secrets[f"gcp_service_account_{service_no}"])
             }
         }
     )
@@ -603,7 +603,7 @@ st.button(reload_btn, key="reload_btn")
 st.title("BioProject Annotation")
 annotate, search, predict = st.tabs(tab_names)
 
-connection = connect_gsheets_api()
+connection = connect_gsheets_api(1)
 project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
 pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
 metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)

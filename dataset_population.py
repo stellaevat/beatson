@@ -24,12 +24,12 @@ project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Typ
 style_tags = ["b", "i", "p"]
 
 @st.cache_resource(show_spinner=False)
-def connect_gsheets_api():
+def connect_gsheets_api(service_no):
     connection = connect(
         ":memory:",
         adapter_kwargs = {
             "gsheetsapi": { 
-                "service_account_info":  dict(st.secrets["gcp_service_account"])
+                "service_account_info":  dict(st.secrets[f"gcp_service_account_{service_no}"])
             }
         }
     )
@@ -48,9 +48,13 @@ def store_data(gsheet_url, entries):
                 INSERT INTO "{gsheet_url}" ({", ".join(columns)})
                 VALUES {values_str}
                 '''
-        connection.execute(insert)
+        
+        connection_used = st.session_state.get("connection_used", 0)
+        connections[connection_used].execute(insert)
+        st.session_state.connection_used = (connection_used + 1) % len(connections)
         print(f"{min(batch + GOOGLE_API_CALLS_PM, len(values))}/{len(values)} entries stored...")
-        # Not to exceed API limit
+        
+        # Won't be necessary once multiple users are used
         time.sleep(60)
         
  
@@ -109,8 +113,7 @@ def clean_text(data_dict):
                 data = data.replace(f"<{tag.upper()}>", " ")
                 data = data.replace(f"</{tag}>", " ")
                 data = data.replace(f"</{tag.upper()}>", " ")
-        
-        # TODO: If quotes useful, replace with single quote instead
+
         # For API call syntax purposes
         data = data.replace('"', "").strip()
         if len(data) > 1:
@@ -231,7 +234,8 @@ def retrieve_projects(ids):
     return all_project_data, all_pub_data
 
 if __name__ == '__main__':
-    connection = connect_gsheets_api()
+    connections = [connect_gsheets_api(i) for i in range(5)]
+    st.session_state.connection_used = 0
     ids = ""
     with open("project_ids.txt", encoding="utf8") as f:
         ids = f.readlines()
