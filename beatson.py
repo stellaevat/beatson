@@ -603,7 +603,7 @@ st.button(reload_btn, key="reload_btn")
 st.title("BioProject Annotation")
 annotate, search, predict = st.tabs(tab_names)
 
-connection = connect_gsheets_api(1)
+connection = connect_gsheets_api(0)
 project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
 pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
 metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
