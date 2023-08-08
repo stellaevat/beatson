@@ -40,7 +40,7 @@ UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
-metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro", "Confident_Percentage"]
+metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro", "Confidence_Score"]
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL]
 search_columns = [ACC_COL, TITLE_COL]
@@ -216,9 +216,6 @@ def display_navigation_buttons(tab, total_projects):
     with col2:
         if selected_row_index < total_projects - 1:
             st.button(next_btn, on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
-            
-    st.write("")
-    st.write("")
 
 @st.cache_data(show_spinner=False)
 def get_grid_options(df, columns, starting_page, selected_row_index, selection_mode="single"):
@@ -255,7 +252,7 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     
     builder = GridOptionsBuilder.from_dataframe(df[columns])
     
-    builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=110)
+    builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=115)
     builder.configure_column(TITLE_COL, flex=3)
     builder.configure_column(columns[-1], flex=1)
     builder.configure_selection(selection_mode=selection_mode)
@@ -455,6 +452,7 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     original_labels = get_project_labels(project_id)
     st.session_state[tab + "_labels"] = original_labels
 
+    st.write("")
     with st.form(key=(tab + "_annotation_form")):
         st.write(f"Edit **{project_id}** annotation:")
         if label_options and allow_new:
@@ -595,9 +593,6 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
             update_sheet(project_id, {PREDICT_COL : None, PROBA_COL : None})
             project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, PROBA_COL]] = None
             
-            
-def display_export_button(tab):
-    st.download_button("Export to CSV", project_df.to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
     
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
@@ -624,7 +619,6 @@ with annotate:
                 st.write(f"No results for '{find_terms}'. All projects:")
         
         if not annotate_df.empty:
-            # display_export_button(TAB_ANNOTATE)
             display_interactive_grid(TAB_ANNOTATE, annotate_df, annot_columns)
             display_annotation_feature(TAB_ANNOTATE, annotate_df)
         
@@ -669,7 +663,7 @@ with predict:
             process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
             
             metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci), confident_pct])
-            if metric_df.empty or (metric_df == metric_row).all(1).any():
+            if metric_df.empty or not (metric_df == metric_row).all(1).any():
                 insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
                 metric_df.loc[len(metric_df)] = metric_row
 

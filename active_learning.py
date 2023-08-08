@@ -139,4 +139,4 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     else:
         to_annotate = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
         
-    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, None
+    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, np.mean(y_probabilities)
