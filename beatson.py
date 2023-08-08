@@ -503,7 +503,6 @@ def get_sample_matrix(df, pub_df):
         X_labelled.append(text)
     return X_labelled
  
-@st.cache_data(show_spinner="Checking dataset...") 
 def check_dataset(project_df):
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
