@@ -134,4 +134,6 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     else:
         scores = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
         
+    to_annotate = scores[:SUGGESTIONS] if SUGGESTIONS < len(scores) else scores    
+        
     return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, np.mean(scores)
