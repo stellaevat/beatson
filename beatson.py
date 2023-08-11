@@ -548,12 +548,12 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
         old_probability = project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item()
         old_probability = old_probability if old_probability else ""
         
-        if predicted_str != old_prediction and probability != old_probability:
-            update_sheet(project_id, {PREDICT_COL : predicted_str, PROBA_COL : probability})
-        elif predicted_str != old_prediction:
-            update_sheet(project_id, {PREDICT_COL : predicted_str})
-        elif probability != old_probability:
-            update_sheet(project_id, {PROBA_COL : probability})
+        # if predicted_str != old_prediction and probability != old_probability:
+            # update_sheet(project_id, {PREDICT_COL : predicted_str, PROBA_COL : probability})
+        # elif predicted_str != old_prediction:
+            # update_sheet(project_id, {PREDICT_COL : predicted_str})
+        # elif probability != old_probability:
+            # update_sheet(project_id, {PROBA_COL : probability})
             
         project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
         project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL] = probability
@@ -573,23 +573,23 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
             if len(changes) < len(new_order) + 1:
                 for (order, project_id) in differences:
                     if new_order[order] == project_id:
-                        update_sheet(project_id, {LEARN_COL : order})
+                        #update_sheet(project_id, {LEARN_COL : order})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
                     else:
-                        update_sheet(project_id, {LEARN_COL : None})
+                        #update_sheet(project_id, {LEARN_COL : None})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = None
             else:
                 clear_sheet_column(LEARN_COL)
                 project_df[LEARN_COL] = None
             
                 for order, project_id in new_order.items():
-                    update_sheet(project_id, order, LEARN_COL)
+                    #update_sheet(project_id, order, LEARN_COL)
                     project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
                     
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     for i, project_id in enumerate(labelled_df[ACC_COL]):
         if project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item():
-            update_sheet(project_id, {PREDICT_COL : None, PROBA_COL : None})
+            #update_sheet(project_id, {PREDICT_COL : None, PROBA_COL : None})
             project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, PROBA_COL]] = None
             
     
@@ -652,16 +652,17 @@ with predict:
         if X_labelled:
             training_size = len(X_labelled)
             
-            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, confident_pct = get_predictions(X_labelled, y_labelled, X_unlabelled)
+            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, confidence_scr = get_predictions(X_labelled, y_labelled, X_unlabelled)
 
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci
+            st.session_state.confidence_scr = confidence_scr
             
             # Columns irrelevant to method cacheing dropped
             df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
             process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
             
-            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci), confident_pct])
+            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci), confidence_scr])
             if metric_df.empty or not (metric_df == metric_row).all(1).any():
                 insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
                 metric_df.loc[len(metric_df)] = metric_row

@@ -71,8 +71,7 @@ def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
-    return to_annotate
+    return expected_loss_reduction_score
   
 # Simplified MMC Algorithm 
 
@@ -82,30 +81,26 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
     y_predicted[y_predicted < 1] = -1
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
-    return to_annotate
+    return expected_loss_reduction_score
     
 def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
     y_dec = y_probabilities * 2 - 1
     y_pred = np.where(y_predicted < 1, -1, 1)
 
     expected_loss_reduction_score = np.argsort(np.sum((1 - y_pred * y_dec)/2, axis=1))[::-1]
-    to_annotate = expected_loss_reduction_score[:SUGGESTIONS] if SUGGESTIONS < len(expected_loss_reduction_score) else expected_loss_reduction_score
-    return to_annotate
+    return expected_loss_reduction_score
   
 # BinMin Algorithm
 
 def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
-    to_annotate = most_uncertain_label_score[:SUGGESTIONS] if SUGGESTIONS < len(most_uncertain_label_score) else most_uncertain_label_score
-    return to_annotate
+    return most_uncertain_label_score
     
     
 def binmin_proba_query_selection(clf, y_probabilities):
     most_uncertain_label_score = np.argsort(np.min(np.abs(y_probabilities-0.5), axis=1))
-    to_annotate = most_uncertain_label_score[:SUGGESTIONS] if SUGGESTIONS < len(most_uncertain_label_score) else most_uncertain_label_score
-    return to_annotate
+    return most_uncertain_label_score
 
 
   
@@ -135,8 +130,8 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     y_predicted = np.where(y_probabilities >= 0.5, 1, 0)
     
     if algorithm == "bin_min_proba":
-        to_annotate = binmin_proba_query_selection(clf, y_probabilities).tolist()
+        scores = binmin_proba_query_selection(clf, y_probabilities).tolist()
     else:
-        to_annotate = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
+        scores = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
         
-    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, np.mean(y_probabilities)
+    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, np.mean(scores)
