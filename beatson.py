@@ -29,18 +29,20 @@ IDTYPE = "acc"
 RETMAX = 10
 RESULTS_PER_PAGE = 10
 PROJECT_THRESHOLD = 10
+ANNOT_SUGGESTIONS = 10
 LABEL_THRESHOLD = 3
+CONFIDENCE_THRESHOLD = 0.75
 
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
-project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Probability", "To_Annotate"]
-UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, PROBA_COL, LEARN_COL  = project_columns
+project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Score", "To_Annotate"]
+UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, SCORE_COL, LEARN_COL  = project_columns
 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
-metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro", "Confidence_Score"]
+metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro"]
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL]
 search_columns = [ACC_COL, TITLE_COL]
@@ -531,32 +533,36 @@ def check_dataset(project_df):
 def int_column(col):
     return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
     
+@st.cache_data(show_spinner=False) 
+def float_column(col):
+    return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
+    
 @st.cache_data(show_spinner="Processing predictions...")
-def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
+def process_predictions(y_predicted, y_scores, labels, df):
     labels = np.array(labels)
+    to_annotate = np.argsort(y_scores)[:ANNOT_SUGGESTIONS].tolist() if len(y_scores) > ANNOT_SUGGESTIONS else np.argsort(y_scores).tolist()
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     
     for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
-        # Average distance from 0.5 across labels, normalised between 0-1
-        probability = "%.3f" % np.mean(2 * np.abs(y_probabilities[i] - 0.5))
+        score = "%.3f" % y_scores[i]
 
         old_prediction = project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item()
         old_prediction = old_prediction if old_prediction else ""
 
-        old_probability = project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item()
-        old_probability = old_probability if old_probability else ""
+        old_score = project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item()
+        old_score = old_score if old_score else ""
         
-        # if predicted_str != old_prediction and probability != old_probability:
-            # update_sheet(project_id, {PREDICT_COL : predicted_str, PROBA_COL : probability})
-        # elif predicted_str != old_prediction:
-            # update_sheet(project_id, {PREDICT_COL : predicted_str})
-        # elif probability != old_probability:
-            # update_sheet(project_id, {PROBA_COL : probability})
+        if predicted_str != old_prediction and score != old_score:
+            update_sheet(project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
+        elif predicted_str != old_prediction:
+            update_sheet(project_id, {PREDICT_COL : predicted_str})
+        elif score != old_score:
+            update_sheet(project_id, {SCORE_COL : score})
             
         project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
-        project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL] = probability
+        project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
         
     if to_annotate:
         old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
@@ -573,24 +579,24 @@ def process_predictions(y_predicted, y_probabilities, to_annotate, labels, df):
             if len(changes) < len(new_order) + 1:
                 for (order, project_id) in differences:
                     if new_order[order] == project_id:
-                        #update_sheet(project_id, {LEARN_COL : order})
+                        update_sheet(project_id, {LEARN_COL : order})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
                     else:
-                        #update_sheet(project_id, {LEARN_COL : None})
+                        update_sheet(project_id, {LEARN_COL : None})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = None
             else:
                 clear_sheet_column(LEARN_COL)
                 project_df[LEARN_COL] = None
             
                 for order, project_id in new_order.items():
-                    #update_sheet(project_id, order, LEARN_COL)
+                    update_sheet(project_id, {LEARN_COL : order})
                     project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
                     
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     for i, project_id in enumerate(labelled_df[ACC_COL]):
-        if project_df.loc[project_df[ACC_COL] == project_id, PROBA_COL].item():
-            #update_sheet(project_id, {PREDICT_COL : None, PROBA_COL : None})
-            project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, PROBA_COL]] = None
+        if project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item():
+            update_sheet(project_id, {PREDICT_COL : None, SCORE_COL : None})
+            project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, SCORE_COL]] = None
             
     
 st.button(reload_btn, key="reload_btn") 
@@ -652,17 +658,16 @@ with predict:
         if X_labelled:
             training_size = len(X_labelled)
             
-            y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, confidence_scr = get_predictions(X_labelled, y_labelled, X_unlabelled)
+            y_predicted, y_scores, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, y_labelled, X_unlabelled)
 
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci
-            st.session_state.confidence_scr = confidence_scr
             
             # Columns irrelevant to method cacheing dropped
             df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
-            process_predictions(y_predicted, y_probabilities, to_annotate, labels, df)
+            process_predictions(y_predicted, y_scores, labels, df)
             
-            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci), confidence_scr])
+            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci)])
             if metric_df.empty or not (metric_df == metric_row).all(1).any():
                 insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
                 metric_df.loc[len(metric_df)] = metric_row
@@ -673,12 +678,16 @@ with predict:
     if not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted")
+
+            # How many above confidence threshold            
+            confidence_pct = 100 * (float_column(predict_df[SCORE_COL]) > CONFIDENCE_THRESHOLD).sum() / len(predict_df)
+            st.write(f"Confidence: **{confidence_pct:.0f}%** of all project annotations were predicted with a confidence score above {CONFIDENCE_THRESHOLD}")
             
             f1_micro_ci = st.session_state.f1_micro_ci
-            st.write(f"Micro-f1: {np.mean(f1_micro_ci):.3f}, with 95% confidence interval ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})")
+            st.write(f"Micro-f1: **{np.mean(f1_micro_ci):.3f}**, with 95% CI ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})")
             
             f1_macro_ci = st.session_state.f1_macro_ci
-            st.write(f"Macro-f1: {np.mean(f1_macro_ci):.3f}, with 95% confidence interval ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")
+            st.write(f"Macro-f1: **{np.mean(f1_macro_ci):.3f}**, with 95% CI ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")     
         else:
             st.header("Previously predicted")
         display_interactive_grid(TAB_PREDICT, predict_df, predict_columns, nav_buttons=False)

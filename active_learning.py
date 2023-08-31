@@ -70,7 +70,7 @@ def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
     y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
 
-    expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
+    expected_loss_reduction_score = np.mean((1 - y_predicted * y_decision)/2, axis=1)[::-1]
     return expected_loss_reduction_score
   
 # Simplified MMC Algorithm 
@@ -80,26 +80,26 @@ def mmc_simplified_query_selection(clf, X_unlabelled):
     y_predicted = clf.predict(X_unlabelled)
     y_predicted[y_predicted < 1] = -1
 
-    expected_loss_reduction_score = np.argsort(np.sum((1 - y_predicted * y_decision)/2, axis=1))[::-1]
+    expected_loss_reduction_score = np.mean((1 - y_predicted * y_decision)/2, axis=1)[::-1]
     return expected_loss_reduction_score
     
 def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
     y_dec = y_probabilities * 2 - 1
     y_pred = np.where(y_predicted < 1, -1, 1)
 
-    expected_loss_reduction_score = np.argsort(np.sum((1 - y_pred * y_dec)/2, axis=1))[::-1]
+    expected_loss_reduction_score = np.mean((1 - y_pred * y_dec)/2, axis=1)[::-1]
     return expected_loss_reduction_score
   
 # BinMin Algorithm
 
 def binmin_query_selection(clf, X_unlabelled):
     y_decision = clf.decision_function(X_unlabelled)
-    most_uncertain_label_score = np.argsort(np.min(np.abs(y_decision), axis=1))
+    most_uncertain_label_score = np.min(np.abs(y_decision), axis=1)
     return most_uncertain_label_score
     
     
 def binmin_proba_query_selection(clf, y_probabilities):
-    most_uncertain_label_score = np.argsort(np.min(np.abs(y_probabilities-0.5), axis=1))
+    most_uncertain_label_score = np.min(np.abs(y_probabilities-0.5), axis=1)
     return most_uncertain_label_score
 
 
@@ -130,10 +130,8 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     y_predicted = np.where(y_probabilities >= 0.5, 1, 0)
     
     if algorithm == "bin_min_proba":
-        scores = binmin_proba_query_selection(clf, y_probabilities).tolist()
+        y_scores = binmin_proba_query_selection(clf, y_probabilities)
     else:
-        scores = mmc_proba_query_selection(clf, y_predicted, y_probabilities).tolist()
-        
-    to_annotate = scores[:SUGGESTIONS] if SUGGESTIONS < len(scores) else scores    
-        
-    return y_predicted, y_probabilities, to_annotate, f1_micro_ci, f1_macro_ci, np.mean(scores)
+        y_scores = mmc_proba_query_selection(clf, y_predicted, y_probabilities)
+
+    return y_predicted, y_scores, f1_micro_ci, f1_macro_ci
