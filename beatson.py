@@ -44,9 +44,9 @@ PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
 metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro"]
 
-annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL]
+annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 search_columns = [ACC_COL, TITLE_COL]
-predict_columns = [ACC_COL, TITLE_COL, PREDICT_COL]
+predict_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
 text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
@@ -219,10 +219,13 @@ def display_navigation_buttons(tab, total_projects):
         if selected_row_index < total_projects - 1:
             st.button(next_btn, on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
 
+
+
 @st.cache_data(show_spinner=False)
 def get_grid_options(df, columns, starting_page, selected_row_index, selection_mode="single"):
     options_dict = {
         "enableCellTextSelection" : True,
+        "enableBrowserTooltips" : True,
         
         "onFirstDataRendered" : JsCode(f"""
             function onFirstDataRendered(params) {{
@@ -251,12 +254,30 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
                 }}
             }}
         """)
+        
+    tooltip_cell = JsCode(""" 
+        class TooltipCellRenderer {
+            init(params) {
+                this.eGui = document.createElement('span');
+                this.eGui.innerHTML = '<span title="' + params.value + '">' + params.value + '</span>';
+            }
+          
+            getGui() {
+                return this.eGui;
+            }
+        }
+    """)
     
     builder = GridOptionsBuilder.from_dataframe(df[columns])
     
+    builder.configure_default_column(cellRenderer=tooltip_cell)
     builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=115)
-    builder.configure_column(TITLE_COL, flex=3)
-    builder.configure_column(columns[-1], flex=1)
+    if TITLE_COL in columns:
+        builder.configure_column(TITLE_COL, flex=3)
+    if ANNOT_COL in columns:
+        builder.configure_column(ANNOT_COL, flex=1)
+    if PREDICT_COL in columns:
+        builder.configure_column(PREDICT_COL, flex=1)
     builder.configure_selection(selection_mode=selection_mode)
     builder.configure_pagination(paginationAutoPageSize=False, paginationPageSize=RESULTS_PER_PAGE)
     builder.configure_grid_options(**options_dict)
@@ -326,6 +347,8 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         display_project_details(df.iloc[selected_row_index])
         if nav_buttons:
             display_navigation_buttons(tab, len(df))
+            
+    st.write("")
 
 
 def update_sheet(project_id, column_values_dict, sheet=GSHEET_URL_PROJ):
@@ -454,7 +477,6 @@ def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
     original_labels = get_project_labels(project_id)
     st.session_state[tab + "_labels"] = original_labels
 
-    st.write("")
     with st.form(key=(tab + "_annotation_form")):
         st.write(f"Edit **{project_id}** annotation:")
         if label_options and allow_new:
@@ -680,12 +702,13 @@ with predict:
             st.write(f"Macro-f1: **{np.mean(f1_macro_ci):.3f}**, with 95% CI ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")     
         else:
             st.header("Previously predicted")
-        display_interactive_grid(TAB_PREDICT, predict_df, predict_columns, nav_buttons=False)
+        display_interactive_grid(TAB_PREDICT, predict_df, predict_columns)
+        display_annotation_feature(TAB_PREDICT, predict_df)
     
     learn_section_name = "Learn"
     learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]    
     if not learn_df.empty:
-        st.header("Improve predictions")
+        st.header("Improve prediction algorithm")
         st.write("To improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(LEARN_COL, axis=0, ignore_index=True, key=lambda col: int_column(col))
