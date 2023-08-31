@@ -195,12 +195,12 @@ def display_project_details(project):
         st.write(f"**{DESCR_COL}:** {project[DESCR_COL]}")
         
     labels = ""
-    if project[PREDICT_COL]:
-        labels += f"""
-            **Predicted annotation:** *{project[PREDICT_COL]}*  
-        """ 
     if project[ANNOT_COL]:
-        labels += f"**Manual annotation:** *{project[ANNOT_COL]}*"
+        labels += f"""**Manual annotation:** *{project[ANNOT_COL]}*  
+        """ 
+    if project[PREDICT_COL]:
+        labels += f"""**Predicted annotation:** *{project[PREDICT_COL]}* ({project[SCORE_COL]} confidence) 
+        """
     if labels:
         st.write(labels)
         
@@ -271,9 +271,10 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     builder = GridOptionsBuilder.from_dataframe(df[columns])
     
     builder.configure_default_column(cellRenderer=tooltip_cell)
-    builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=115)
+    if ACC_COL in columns:
+        builder.configure_column(ACC_COL, lockPosition="left", suppressMovable=True, width=115)
     if TITLE_COL in columns:
-        builder.configure_column(TITLE_COL, flex=3)
+        builder.configure_column(TITLE_COL, flex=2)
     if ANNOT_COL in columns:
         builder.configure_column(ANNOT_COL, flex=1)
     if PREDICT_COL in columns:
