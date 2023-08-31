@@ -658,7 +658,7 @@ with predict:
         if X_labelled:
             training_size = len(X_labelled)
             
-            y_predicted, y_scores, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, y_labelled, X_unlabelled)
+            y_predicted, y_scores, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, X_unlabelled, y_labelled)
 
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci

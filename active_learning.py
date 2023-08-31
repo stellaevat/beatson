@@ -7,16 +7,8 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_validate
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 nlp = spacy.load("en_core_sci_sm")
-
-SUGGESTIONS = 10
-
-metrics = {'accuracy': accuracy_score,
-           'precision': precision_score,
-           'recall': recall_score,
-           'f1': f1_score}
 
 @st.cache_resource(show_spinner=False)
 def get_classifier(probability=True):
@@ -32,7 +24,7 @@ def get_vectorizer():
 # MMC Algorithm
 
 @st.cache_data(show_spinner=False)
-def mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled):
+def mmc_label_prediction(clf, X_labelled, X_unlabelled, y_labelled):
     # Training data for label-number (n) prediction
     y_probability = clf.predict_proba(X_labelled)
     y_normalized = (y_probability.T / np.sum(y_probability, axis=1)).T
@@ -57,7 +49,6 @@ def mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled):
     total_unlabelled = X_unlabelled.shape[0]
     y_predicted = np.full((total_unlabelled, total_labels), -1)
 
-    ## Can this be vectorised?
     for i in range(total_unlabelled):
         ln = n_y_predicted[i]
         for j in y_sorted_indices[i, :ln]:
@@ -66,48 +57,59 @@ def mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled):
     return y_predicted
 
 @st.cache_data(show_spinner=False)
-def mmc_query_selection(clf, X_labelled, y_labelled, X_unlabelled):
+def mmc_scoring(clf, X_labelled, X_unlabelled, y_labelled, y_probabilities):
     y_decision = clf.decision_function(X_unlabelled)
-    y_predicted = mmc_label_prediction(clf, X_labelled, y_labelled, X_unlabelled)
+    y_predicted = mmc_label_prediction(clf, X_labelled, X_unlabelled, y_labelled)
 
     expected_loss_reduction_score = np.mean((1 - y_predicted * y_decision)/2, axis=1)[::-1]
     return expected_loss_reduction_score
   
+  
 # Simplified MMC Algorithm 
 
-def mmc_simplified_query_selection(clf, X_unlabelled):
+def mmc_simple_scoring(clf, X_labelled, X_unlabelled, y_labelled, y_probabilities):
     y_decision = clf.decision_function(X_unlabelled)
     y_predicted = clf.predict(X_unlabelled)
     y_predicted[y_predicted < 1] = -1
 
     expected_loss_reduction_score = np.mean((1 - y_predicted * y_decision)/2, axis=1)[::-1]
     return expected_loss_reduction_score
-    
-def mmc_proba_query_selection(clf, y_predicted, y_probabilities):
-    y_dec = y_probabilities * 2 - 1
-    y_pred = np.where(y_predicted < 1, -1, 1)
-
-    expected_loss_reduction_score = np.mean((1 - y_pred * y_dec)/2, axis=1)[::-1]
-    return expected_loss_reduction_score
+  
   
 # BinMin Algorithm
 
-def binmin_query_selection(clf, X_unlabelled):
+def binmin_scoring(clf, X_labelled, X_unlabelled, y_labelled, y_probabilities):
     y_decision = clf.decision_function(X_unlabelled)
     most_uncertain_label_score = np.min(np.abs(y_decision), axis=1)
     return most_uncertain_label_score
+  
+  
+# Modified algorithms to use already obtained probabilites
+
+def mmc_simple_proba_scoring(clf, X_labelled, X_unlabelled, y_labelled, y_probabilities):
+    y_decision = y_probabilities * 2 - 1
+    y_predicted = np.where(y_probabilities >= 0.5, 1, -1)
+
+    expected_loss_reduction_score = np.mean((1 - y_predicted * y_decision)/2, axis=1)[::-1]
+    return expected_loss_reduction_score   
     
-    
-def binmin_proba_query_selection(clf, y_probabilities):
+def binmin_proba_scoring(clf, X_labelled, X_unlabelled, y_labelled, y_probabilities):
     most_uncertain_label_score = np.min(np.abs(y_probabilities-0.5), axis=1)
     return most_uncertain_label_score
-
 
   
 # Prediction
 
+algorithms = {
+    "mmc" : mmc_scoring,
+    "mmc_simple" : mmc_simple_scoring,
+    "binmin" : binmin_scoring,
+    "mmc_simple_proba" : mmc_simple_proba_scoring,
+    "binmin_proba" : binmin_proba_scoring,
+}
+
 @st.cache_data(show_spinner="Running prediction algorithm...")
-def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba"):
+def get_predictions(X_labelled, X_unlabelled, y_labelled, alg="mmc_simple_proba"):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
     X_unlabelled = vectorizer.transform(X_unlabelled)
@@ -126,12 +128,9 @@ def get_predictions(X_labelled, y_labelled, X_unlabelled, algorithm="mmc_proba")
     f1_macro_ci = stats.t.interval(confidence=0.95, df=(folds-1), loc=np.mean(f1_macros), scale=stats.sem(f1_macros))
     
     clf.fit(X_labelled, y_labelled)
-    y_probabilities = clf.predict_proba(X_unlabelled)
-    y_predicted = np.where(y_probabilities >= 0.5, 1, 0)
     
-    if algorithm == "bin_min_proba":
-        y_scores = binmin_proba_query_selection(clf, y_probabilities)
-    else:
-        y_scores = mmc_proba_query_selection(clf, y_predicted, y_probabilities)
+    y_probabilities = clf.predict_proba(X_unlabelled)
+    y_scores = algorithms[alg](clf, X_labelled, X_unlabelled, y_labelled, y_probabilities)
+    y_predicted = np.where(y_probabilities >= 0.5, 1, 0)
 
     return y_predicted, y_scores, f1_micro_ci, f1_macro_ci
