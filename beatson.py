@@ -550,48 +550,38 @@ def process_predictions(y_predicted, y_scores, labels, df):
 
         old_prediction = project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item()
         old_prediction = old_prediction if old_prediction else ""
-
         old_score = project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item()
         old_score = old_score if old_score else ""
         
-        if predicted_str != old_prediction and score != old_score:
+        if predicted_str != old_prediction or score != old_score:
             update_sheet(project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
-        elif predicted_str != old_prediction:
-            update_sheet(project_id, {PREDICT_COL : predicted_str})
-        elif score != old_score:
-            update_sheet(project_id, {SCORE_COL : score})
-            
-        project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
-        project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
+            project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
+            project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
         
     if to_annotate:
         old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
-        old_order = {project[LEARN_COL] : project[ACC_COL] for (i, project) in old_learn_df.iterrows()}
-        
         new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
-        new_order = {str(i+1) : project[ACC_COL] for (i, project) in new_learn_df.iterrows()}
         
-        differences = set(old_order.items()) ^ set(new_order.items())
-        if differences:
-            # Update with minimum API calls
-            # (unnecessary for small number of suggestions, could just use else branch)
-            changes = {project_id for (order, project_id) in differences}
-            if len(changes) < len(new_order) + 1:
-                for (order, project_id) in differences:
-                    if new_order[order] == project_id:
-                        update_sheet(project_id, {LEARN_COL : order})
-                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
-                    else:
-                        update_sheet(project_id, {LEARN_COL : None})
-                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = None
+        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows()}
+        for (i, project) in new_learn_df.iterrows():
+            updates[project[ACC_COL]] = str(i+1)
+          
+        # Update with minimum API calls  
+        if updates:
+            if len(updates) < len(new_learn_df) + 1:
+                for (project_id, order) in updates.items():
+                    update_sheet(project_id, {LEARN_COL : order})
+                    project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
             else:
                 clear_sheet_column(LEARN_COL)
                 project_df[LEARN_COL] = None
-            
-                for order, project_id in new_order.items():
-                    update_sheet(project_id, {LEARN_COL : order})
-                    project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
-                    
+                for (project_id, order) in updates.items():
+                    if order is not None:
+                        update_sheet(project_id, {LEARN_COL : order})
+                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
+    
+    
+    # Clear predictions from earlier runs (labelled projects not updated above)
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     for i, project_id in enumerate(labelled_df[ACC_COL]):
         if project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item():
