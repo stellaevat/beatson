@@ -109,7 +109,7 @@ algorithms = {
 }
 
 @st.cache_data(show_spinner="Running prediction algorithm...")
-def get_predictions(X_labelled, X_unlabelled, y_labelled, alg="mmc_simple_proba"):
+def active_learning(X_labelled, X_unlabelled, y_labelled, alg="mmc_simple_proba"):
     vectorizer = get_vectorizer()
     X_labelled = vectorizer.fit_transform(X_labelled)
     X_unlabelled = vectorizer.transform(X_unlabelled)

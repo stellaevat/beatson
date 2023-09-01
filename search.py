@@ -28,6 +28,9 @@ search_msg = "Getting search results..."
 
 def get_databases():
     return PROJECT_DB, PUB_DB
+    
+def get_base_urls():
+    return BASE_URL_PROJ, BASE_URL_PUB
 
 def parse_xml(element):
     is_text = (element.text and not element.text.isspace())

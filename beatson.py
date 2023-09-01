@@ -4,25 +4,16 @@ import numpy as np
 import hashlib
 from datetime import date
 import streamlit.components.v1 as components
-from gsheets import connect_gsheets_api, load_sheet, update_sheet, insert_sheet, clear_sheet_column, get_gsheets_urls, get_gsheets_columns, get_delimiter
+from gsheets import connect_gsheets_api, load_sheet, insert_sheet, get_gsheets_urls, get_gsheets_columns
 from search import display_search_feature, api_search, local_search
 from grids import display_interactive_grid, get_grid_buttons, get_primary_colour
 from annotate import display_annotation_feature, display_add_to_dataset_feature
-from active_learning import get_predictions
+from predict import process_dataset, process_predictions
+from active_learning import active_learning
 
 st.set_page_config(page_title="BioProject Annotation")
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
-DELIMITER = get_delimiter()
-
-
-PROJECT_THRESHOLD = 10
-ANNOT_SUGGESTIONS = 10
-LABEL_THRESHOLD = 3
-CONFIDENCE_THRESHOLD = 0.75
-
-tab_names = ["Annotate", "Search", "Predict"]
-TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
 project_columns, pub_columns, metric_columns = get_gsheets_columns()
 UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, SCORE_COL, LEARN_COL  = project_columns
@@ -35,11 +26,13 @@ detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
 text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
 
+tab_names = ["Annotate", "Search", "Predict"]
+TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
+
+CONFIDENCE_THRESHOLD = 0.75
+
 reload_btn, export_btn, show_btn, hide_btn, next_btn, prev_btn = get_grid_buttons()
 primary_colour = get_primary_colour()
-
-
-markdown_translation = str.maketrans({char : '\\' + char for char in r'\`*_{}[]()#+-.!:><&'})
 
 css = f"""
     <style>
@@ -52,6 +45,7 @@ css = f"""
 """
 st.markdown(css, unsafe_allow_html=True)
     
+    
 @st.cache_data(show_spinner=False) 
 def int_column(col):
     return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
@@ -59,117 +53,7 @@ def int_column(col):
 @st.cache_data(show_spinner=False) 
 def float_column(col):
     return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
-        
-@st.cache_resource(show_spinner=False)
-def get_label_matrix(df):
-    labels = set()
-    for annotation in df[ANNOT_COL]:
-        if annotation is not None:
-            labels.update(set(annotation.split(DELIMITER)))
-    labels = sorted(list(labels))
-
-    label_to_index = {}
-    index_to_label = {}
-    for i, label in enumerate(labels):
-        label_to_index[label] = i
-        index_to_label[i] = label
     
-    y_labelled = np.zeros((len(df), len(labels)))
-    for i, annotation in enumerate(df[ANNOT_COL]):
-        if annotation is not None:
-            for label in annotation.split(DELIMITER):
-                y_labelled[i, label_to_index[label]] = 1
-            
-    return y_labelled, label_to_index, index_to_label
- 
-@st.cache_resource(show_spinner=False) 
-def get_sample_matrix(df, pub_df):
-    X_labelled = []
-    for i, project in df.iterrows():
-        text = " ".join([field for field in project[text_columns] if field is not None])
-        if project[PUB_COL]:
-            for pmid in project[PUB_COL].split(DELIMITER):
-                text += " " + " ".join([field for field in pub_df.loc[pub_df[PMID_COL] == pmid].iloc[0] if field is not None])
-        X_labelled.append(text)
-    return X_labelled
- 
-def check_dataset(project_df):
-    unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
-    labelled_df = project_df[project_df[ANNOT_COL].notnull()]
-    y_labelled, label_to_index, index_to_label = get_label_matrix(labelled_df)
-    
-    label_sums = np.sum(y_labelled, axis=0)
-    project_sum = np.sum(y_labelled, axis=1)
-    labelled_projects = len(project_sum[project_sum > 0]) 
-    rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
-
-    if labelled_projects == len(project_df):
-        message.write("All projects in the dataset have been manually annotated. Use the **Search** tab to find and add unannotated projects.")
-    elif labelled_projects < PROJECT_THRESHOLD:
-        message.write(f"So far **{labelled_projects} projects** have been annotated. For the algorithm to work well please find at least **{PROJECT_THRESHOLD - labelled_projects}** more project{'s' if PROJECT_THRESHOLD - labelled_projects > 1 else ''} to annotate.") 
-    elif len(rare_labels) > 0:
-        message.write(f"Some labels have less than **{LABEL_THRESHOLD} samples**. For the algorithm to work well please find more projects to label as: **{', '.join([index_to_label[i] for i in rare_labels])}**.")
-    else:
-        X_labelled = get_sample_matrix(labelled_df, pub_df)
-        X_unlabelled = get_sample_matrix(unlabelled_df, pub_df)
-        labels = sorted(list(label_to_index.keys()), key=lambda x: label_to_index[x])
-        return X_labelled, X_unlabelled, y_labelled, labels
-        
-    return None, None, None, None
-
-    
-@st.cache_data(show_spinner="Processing predictions...")
-def process_predictions(y_predicted, y_scores, labels, df):
-    labels = np.array(labels)
-    to_annotate = np.argsort(y_scores)[:ANNOT_SUGGESTIONS].tolist() if len(y_scores) > ANNOT_SUGGESTIONS else np.argsort(y_scores).tolist()
-    unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
-    
-    for i, project_id in enumerate(unlabelled_df[ACC_COL]):
-        predicted_mask = np.where(y_predicted[i] > 0, True, False)
-        predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
-        score = "%.3f" % y_scores[i]
-
-        old_prediction = project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL].item()
-        old_prediction = old_prediction if old_prediction else ""
-        old_score = project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item()
-        old_score = old_score if old_score else ""
-        
-        if predicted_str != old_prediction or score != old_score:
-            update_sheet(connection, project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
-            project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
-            project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
-        
-    if to_annotate:
-        old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
-        new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
-        
-        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows() if project[ACC_COL] != new_learn_df[new_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item()}
-        for (i, project) in new_learn_df.iterrows():
-            if project[ACC_COL] != old_learn_df[old_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item():
-                updates[project[ACC_COL]] = str(i+1)
-          
-        # Update with minimum API calls  
-        if updates:
-            if len(updates) < len(new_learn_df) + 1:
-                for (project_id, order) in updates.items():
-                    update_sheet(connection, project_id, {LEARN_COL : order})
-                    project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
-            else:
-                clear_sheet_column(connection, LEARN_COL)
-                project_df[LEARN_COL] = None
-                for (project_id, order) in updates.items():
-                    if order is not None:
-                        update_sheet(connection, project_id, {LEARN_COL : order})
-                        project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
-    
-    
-    # Clear predictions from earlier runs (labelled projects not updated above)
-    labelled_df = project_df[project_df[ANNOT_COL].notnull()]
-    for i, project_id in enumerate(labelled_df[ACC_COL]):
-        if project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item():
-            update_sheet(connection, project_id, {PREDICT_COL : None, SCORE_COL : None})
-            project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, SCORE_COL]] = None
-            
     
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
@@ -229,20 +113,21 @@ with predict:
     start_button = st.button("Start", key="start_button")
 
     if start_button:
-        X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
+        X_labelled, X_unlabelled, y_labelled, labels, error = process_dataset(project_df, pub_df)
+        
         if X_labelled:
             train_size = len(X_labelled)
             test_size = len(X_unlabelled)
             dataset_hash = hashlib.shake_256(pd.util.hash_pandas_object(project_df[[ACC_COL, ANNOT_COL]].sort_values(ACC_COL, axis=0), index=False).values).hexdigest(8)
             
-            y_predicted, y_scores, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, X_unlabelled, y_labelled)
+            y_predicted, y_scores, f1_micro_ci, f1_macro_ci = active_learning(X_labelled, X_unlabelled, y_labelled)
 
             st.session_state.f1_micro_ci = f1_micro_ci
             st.session_state.f1_macro_ci = f1_macro_ci
             
             # Columns irrelevant to method cacheing dropped
             df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
-            process_predictions(y_predicted, y_scores, labels, df)
+            process_predictions(y_predicted, y_scores, labels, df, connection)
             
             metric_row = np.array([date.today().strftime("%d/%m/%Y"), dataset_hash, train_size, test_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci)])
             if metric_df.empty or not (metric_df == metric_row).all(1).any():
@@ -250,6 +135,8 @@ with predict:
                 metric_df.loc[len(metric_df)] = metric_row
 
             st.session_state.new_predictions = True
+        else:
+            message.write(error)
     
     predict_df = project_df[project_df[PREDICT_COL].notnull()].reset_index(drop=True)
     if not predict_df.empty:
@@ -277,7 +164,7 @@ with predict:
         display_annotation_feature(TAB_PREDICT, connection, predict_df)
     
     learn_section_name = "Learn"
-    learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]    
+    learn_df = project_df[project_df[LEARN_COL].notnull()]    
     if not learn_df.empty:
         st.header("Improve prediction algorithm")
         st.write("To improve performance, consider annotating the following projects:")
@@ -285,6 +172,7 @@ with predict:
         learn_df = learn_df.sort_values(LEARN_COL, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid(learn_section_name, learn_df, annot_columns)
         display_annotation_feature(learn_section_name, connection, learn_df)
+
         
 components.html(
     f"""
