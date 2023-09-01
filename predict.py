@@ -3,9 +3,9 @@ import numpy as np
 from gsheets import update_sheet, clear_sheet_column, get_gsheets_urls, get_gsheets_columns, get_delimiter
 
 project_columns, pub_columns, metric_columns = get_gsheets_columns()
+
 UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, SCORE_COL, LEARN_COL  = project_columns
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
-text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 
 PROJECT_THRESHOLD = 10
 ANNOT_SUGGESTIONS = 10
@@ -36,18 +36,19 @@ def get_label_matrix(df):
     return y_labelled, label_to_index, index_to_label
  
 @st.cache_resource(show_spinner=False) 
-def get_sample_matrix(df, pub_df):
+def get_sample_matrix(df, pub_df, text_columns):
     X_labelled = []
     for i, project in df.iterrows():
         text = " ".join([field for field in project[text_columns] if field is not None])
         if project[PUB_COL]:
             for pmid in project[PUB_COL].split(DELIMITER):
-                text += " " + " ".join([field for field in pub_df.loc[pub_df[PMID_COL] == pmid].iloc[0] if field is not None])
+                if pmid in pub_df[PMID_COL]:
+                    text += " " + " ".join([field for field in pub_df.loc[pub_df[PMID_COL] == pmid].iloc[0] if field is not None])
         X_labelled.append(text)
     return X_labelled
 
 @st.cache_data(show_spinner="Processing dataset...")
-def process_dataset(project_df, pub_df): 
+def process_dataset(project_df, pub_df, text_columns): 
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     y_labelled, label_to_index, index_to_label = get_label_matrix(labelled_df)
@@ -64,8 +65,8 @@ def process_dataset(project_df, pub_df):
     elif len(rare_labels) > 0:
         error = f"Some labels have less than **{LABEL_THRESHOLD} samples**. For the algorithm to work well please find more projects to label as: **{', '.join([index_to_label[i] for i in rare_labels])}**."
     else:
-        X_labelled = get_sample_matrix(labelled_df, pub_df)
-        X_unlabelled = get_sample_matrix(unlabelled_df, pub_df)
+        X_labelled = get_sample_matrix(labelled_df, pub_df, text_columns)
+        X_unlabelled = get_sample_matrix(unlabelled_df, pub_df, text_columns)
         labels = sorted(list(label_to_index.keys()), key=lambda x: label_to_index[x])
         return X_labelled, X_unlabelled, y_labelled, labels, ""
         
@@ -96,12 +97,12 @@ def process_predictions(y_predicted, y_scores, labels, df, _connection):
             project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
         
     if to_annotate:
-        old_learn_df = project_df[project_df[LEARN_COL].notnull()]
+        old_learn_df = project_df[project_df[LEARN_COL].replace('', None).notnull()]
         new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
         
-        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows() if project[ACC_COL] != new_learn_df[new_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item()}
+        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows() if project[ACC_COL] not in new_learn_df[ACC_COL].values}
         for (i, project) in new_learn_df.iterrows():
-            if project[ACC_COL] != old_learn_df[old_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item():
+            if project[ACC_COL] not in old_learn_df[ACC_COL].values or project[LEARN_COL] != old_learn_df[old_learn_df[ACC_COL] == project[ACC_COL]][LEARN_COL].item():
                 updates[project[ACC_COL]] = str(i+1)
           
         # Update with minimum API calls  
@@ -120,8 +121,8 @@ def process_predictions(y_predicted, y_scores, labels, df, _connection):
     
     
     # Clear predictions from earlier runs (labelled projects not updated above)
-    labelled_df = project_df[project_df[ANNOT_COL].notnull()]
-    for i, project_id in enumerate(labelled_df[ACC_COL]):
-        if project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item():
-            update_sheet(connection, project_id, {PREDICT_COL : None, SCORE_COL : None})
+    labelled_df = project_df[project_df[ANNOT_COL].replace('', None).notnull()]
+    for (i, project) in labelled_df.iterrows():
+        if project[PREDICT_COL] or project[SCORE_COL]:
+            update_sheet(_connection, project_id, {PREDICT_COL : None, SCORE_COL : None})
             project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, SCORE_COL]] = None

@@ -14,17 +14,15 @@ from active_learning import active_learning
 st.set_page_config(page_title="BioProject Annotation")
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
-
 project_columns, pub_columns, metric_columns = get_gsheets_columns()
+
 UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, SCORE_COL, LEARN_COL  = project_columns
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 search_columns = [ACC_COL, TITLE_COL]
 predict_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
-detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
 text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
-export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
 
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
@@ -113,7 +111,7 @@ with predict:
     start_button = st.button("Start", key="start_button")
 
     if start_button:
-        X_labelled, X_unlabelled, y_labelled, labels, error = process_dataset(project_df, pub_df)
+        X_labelled, X_unlabelled, y_labelled, labels, error = process_dataset(project_df, pub_df, text_columns)
         
         if X_labelled:
             train_size = len(X_labelled)
@@ -138,7 +136,8 @@ with predict:
         else:
             message.write(error)
     
-    predict_df = project_df[project_df[PREDICT_COL].notnull()].reset_index(drop=True)
+    # Prediction could be empty so relying on existence of score
+    predict_df = project_df[project_df[SCORE_COL].replace('', None).notnull()].reset_index(drop=True)
     if not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted")
@@ -164,10 +163,10 @@ with predict:
         display_annotation_feature(TAB_PREDICT, connection, predict_df)
     
     learn_section_name = "Learn"
-    learn_df = project_df[project_df[LEARN_COL].notnull()]    
+    learn_df = project_df[project_df[LEARN_COL].replace('', None).notnull()]    
     if not learn_df.empty:
         st.header("Improve prediction algorithm")
-        st.write("To improve performance, consider annotating the following projects:")
+        st.write("To optimally improve performance, consider annotating the following projects:")
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(LEARN_COL, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid(learn_section_name, learn_df, annot_columns)
