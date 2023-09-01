@@ -231,11 +231,11 @@ def api_search(search_terms, existing_projects):
             
             
 @st.cache_resource(show_spinner=search_msg)
-def local_search(search_terms, df, _text_columns):
+def local_search(search_terms, df, text_columns):
     search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
     search_expr = "".join([f"(?=.*{term})" for term in search_terms])
     
-    raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in _text_columns])
+    raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
     total_counts = np.sum(raw_counts, axis=1)
     mask = np.where(total_counts > 0, True, False)
     search_df = df.loc[mask]

@@ -8,7 +8,7 @@ GSHEETS_URL_METRICS = st.secrets["private_gsheets_url_metrics"]
 GSHEET_API_CALLS_PM = 60
 
 ACC_COL = "Accession"
-project_columns = ["UID", ACC_COL, "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Score", "To_Annotate"]
+project_columns = ["UID", ACC_COL, "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Prediction", "Score", "To_Annotate"]
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 metric_columns = ["Date", "Dataset_Hash", "Train_Size", "Test_Size", "F1_micro", "F1_macro"]
 
