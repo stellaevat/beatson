@@ -170,7 +170,7 @@ def display_project_details(project):
         labels += f"""**Manual annotation:** *{project[ANNOT_COL]}*  
         """ 
     if project[PREDICT_COL]:
-        labels += f"""**Predicted annotation:** *{project[PREDICT_COL]}* ({project[SCORE_COL]} confidence) 
+        labels += f"""**Predicted annotation:** *{project[PREDICT_COL]}* ({project[SCORE_COL]} confidence)  
         """
     if labels:
         st.write(labels)
@@ -533,9 +533,10 @@ def process_predictions(y_predicted, y_scores, labels, df):
         old_learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]
         new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
         
-        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows()}
+        updates = {project[ACC_COL] : None for (i, project) in old_learn_df.iterrows() if project[ACC_COL] != new_learn_df[new_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item()}
         for (i, project) in new_learn_df.iterrows():
-            updates[project[ACC_COL]] = str(i+1)
+            if project[ACC_COL] != old_learn_df[old_learn_df[LEARN_COL] == project[LEARN_COL]][ACC_COL].item():
+                updates[project[ACC_COL]] = str(i+1)
           
         # Update with minimum API calls  
         if updates:
@@ -641,16 +642,27 @@ with predict:
     if not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted")
-
+            metrics = ""
+            
             # How many above confidence threshold            
             confidence_pct = 100 * (float_column(predict_df[SCORE_COL]) > CONFIDENCE_THRESHOLD).sum() / len(predict_df)
-            st.write(f"Confidence: **{confidence_pct:.0f}%** of all project annotations were predicted with a confidence score above {CONFIDENCE_THRESHOLD}")
+            st.write(f"""**{confidence_pct:.0f}%** of all project annotations were predicted with a confidence score over {CONFIDENCE_THRESHOLD}  
+            """)
             
             f1_micro_ci = st.session_state.f1_micro_ci
-            st.write(f"Micro-f1: **{np.mean(f1_micro_ci):.3f}**, with 95% CI ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})")
+            metrics += f"""Micro-f1: **{np.mean(f1_micro_ci):.3f}**, with 95% CI ({f1_micro_ci[0]:.3f}, {f1_micro_ci[1]:.3f})  
+            """
             
             f1_macro_ci = st.session_state.f1_macro_ci
-            st.write(f"Macro-f1: **{np.mean(f1_macro_ci):.3f}**, with 95% CI ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})")     
+            metrics += f"""Macro-f1: **{np.mean(f1_macro_ci):.3f}**, with 95% CI ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})  
+            """
+
+            st.write(metrics)
+            
+            
+            
+            
+            
         else:
             st.header("Previously predicted")
         display_interactive_grid(TAB_PREDICT, predict_df, predict_columns)
