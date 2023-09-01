@@ -6,7 +6,8 @@ from datetime import date
 import streamlit.components.v1 as components
 from gsheets import connect_gsheets_api, load_sheet, update_sheet, insert_sheet, clear_sheet_column, get_gsheets_urls, get_gsheets_columns, get_delimiter
 from search import display_search_feature, api_search, local_search
-from grids import display_interactive_grid, get_grid_buttons, get_primary_colour 
+from grids import display_interactive_grid, get_grid_buttons, get_primary_colour
+from annotate import display_annotation_feature, display_add_to_dataset_feature
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
@@ -51,130 +52,13 @@ css = f"""
 """
 st.markdown(css, unsafe_allow_html=True)
     
-
-
-
-
-
-
-
- 
-def add_to_dataset(tab, df, new_pub_df):
-    for i, project in pd.DataFrame(df).iterrows():
-        if project[ACC_COL] not in project_df[ACC_COL].unique():
-            project_df.loc[len(project_df.index)] = project.tolist()
-            insert_sheet(connection, project.fillna(value='').tolist())
-            
-            publications = project[PUB_COL]
-            if publications and new_pub_df is not None:
-                for pmid in publications.split(DELIMITER):
-                    if pmid in new_pub_df[PMID_COL].unique() and pmid not in pub_df[PMID_COL].unique():
-                        pub_values = new_pub_df.loc[new_pub_df[PMID_COL] == pmid].squeeze()
-                        insert_sheet(connection, pub_values.tolist(), pub_columns, GSHEETS_URL_PUB)
-                        pub_df.loc[len(pub_df)] = pub_values
-                        
-            # Display update
-            api_df.drop(i, axis=0, inplace=True)
-            selected_projects = st.session_state.get(tab + "_selected_projects", [])
-            if project[ACC_COL] in selected_projects:
-                selected_projects.remove(project[ACC_COL])
-                st.session_state[tab + "_selected_projects"] = selected_projects
-                
-    st.session_state[tab + "_selected_row_index"] = 0
-                        
-                    
-def display_add_to_dataset_feature(tab, df, new_pub_df):
-    st.header("Add to dataset")
-    col1, col2, col3 = st.columns(3)
+@st.cache_data(show_spinner=False) 
+def int_column(col):
+    return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
     
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][ACC_COL]
-    selected_projects = st.session_state.get(tab + "_selected_projects", [])
-    
-    with st.form(key=(tab + "_add_form")):
-        add_selection = st.multiselect("Add selection", df[ACC_COL], default=selected_projects, label_visibility="collapsed", key=(tab + "_add_selection"))
-        
-        # Buttons as close as possible without line-breaks
-        col1, col2 = st.columns([0.818, 0.182])
-        with col1:
-            st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, df[df[ACC_COL].isin(add_selection)], new_pub_df))
-        with col2:
-            st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, df, new_pub_df))
-        
-
-
-def get_project_labels(project_id, column=ANNOT_COL):
-    if project_id in project_df[ACC_COL].unique():
-        project_labels = project_df[project_df[ACC_COL] == project_id][column].item()
-            
-        if project_labels:
-            return project_labels.split(DELIMITER)
-    return []
-    
-
-def update_labels(tab, df, new_pub_df=None):
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][ACC_COL]
-    
-    existing = st.session_state.get(tab + "_labels", "")
-    new = st.session_state.get(tab + "_new", "")
-    updated_labels = (set(existing) | {n.strip() for n in new.split(",")}) - {""}
-    updated_labels_str = DELIMITER.join(sorted(list(updated_labels)))
-    
-    if project_id in project_df[ACC_COL].unique():
-        original_labels = get_project_labels(project_id)
-        if updated_labels ^ set(original_labels):
-            update_sheet(connection, project_id, {ANNOT_COL : updated_labels_str})
-            
-            if updated_labels_str:
-                project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = updated_labels_str
-                
-                # So that selected row still within bounds
-                if project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL].item() == True:
-                    st.session_state[TAB_PREDICT + "_selected_row_index"] = 0
-            else:
-                project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = None
-    else:
-        add_to_dataset(df.iloc[selected_row_index], new_pub_df)
-            
-    st.session_state[tab + "_new"] = ""
-    
-
-@st.cache_data(show_spinner=False)    
-def get_label_options(project_df):
-    label_options = set()
-    if not project_df.empty:
-        for annotation in project_df[ANNOT_COL]:
-            if annotation is not None:
-                label_options.update(set(annotation.split(DELIMITER)))
-        label_options = sorted(list(label_options))
-    return label_options
-    
-    
-def display_annotation_feature(tab, df, new_pub_df=None, allow_new=True):
-    selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
-    project_id = df.iloc[selected_row_index][ACC_COL]
-    
-    label_options = get_label_options(project_df)
-    original_labels = get_project_labels(project_id)
-    st.session_state[tab + "_labels"] = original_labels
-
-    with st.form(key=(tab + "_annotation_form")):
-        st.write(f"Edit **{project_id}** annotation:")
-        if label_options and allow_new:
-            col1, col2 = st.columns(2)
-            with col1:
-                labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
-            with col2:
-                new = st.text_input("Create new", placeholder="Or create new (comma-separated)", label_visibility="collapsed", autocomplete="off", key=(tab + "_new"))
-        elif label_options:
-            labels = st.multiselect("Choose", label_options, label_visibility="collapsed", key=(tab + "_labels"))
-        else:
-            labels = ""
-            new = st.text_input("Create new", placeholder="Create new (comma-separated)", label_visibility="collapsed", autocomplete="off", key=(tab + "_new"))
-
-        st.form_submit_button("Update", on_click=update_labels, args=(tab, df, new_pub_df))
-        
+@st.cache_data(show_spinner=False) 
+def float_column(col):
+    return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
         
 @st.cache_resource(show_spinner=False)
 def get_label_matrix(df):
@@ -233,13 +117,6 @@ def check_dataset(project_df):
         
     return None, None, None, None
 
-@st.cache_data(show_spinner=False) 
-def int_column(col):
-    return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
-    
-@st.cache_data(show_spinner=False) 
-def float_column(col):
-    return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
     
 @st.cache_data(show_spinner="Processing predictions...")
 def process_predictions(y_predicted, y_scores, labels, df):
@@ -303,6 +180,9 @@ project_df = load_sheet(connection, project_columns, GSHEETS_URL_PROJ)
 pub_df = load_sheet(connection, pub_columns, GSHEETS_URL_PUB)
 metric_df = load_sheet(connection, metric_columns, GSHEETS_URL_METRICS)
 
+st.session_state.project_df = project_df
+st.session_state.pub_df = pub_df
+
 with annotate:
     st.header("Annotate projects")
     annotate_df = project_df
@@ -320,7 +200,7 @@ with annotate:
         
         if not annotate_df.empty:
             display_interactive_grid(TAB_ANNOTATE, annotate_df, annot_columns)
-            display_annotation_feature(TAB_ANNOTATE, annotate_df)
+            display_annotation_feature(TAB_ANNOTATE, connection, annotate_df)
         
     else:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
@@ -335,7 +215,7 @@ with search:
         if api_df is not None and not api_df.empty:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(TAB_SEARCH, api_df, search_columns)
-            display_add_to_dataset_feature(TAB_SEARCH, api_df, api_pub_df)
+            display_add_to_dataset_feature(TAB_SEARCH, connection, api_df, api_pub_df)
         elif found:
             st.write(f"No results for '{api_terms}' that are not already in the dataset. Try looking for something else.")
         else:
@@ -371,7 +251,7 @@ with predict:
 
             st.session_state.new_predictions = True
     
-    predict_df = project_df[project_df[PREDICT_COL].notnull()]
+    predict_df = project_df[project_df[PREDICT_COL].notnull()].reset_index(drop=True)
     if not predict_df.empty:
         if st.session_state.get("new_predictions", False):
             st.header("Predicted")
@@ -390,16 +270,11 @@ with predict:
             metrics += f"""Macro-f1: **{np.mean(f1_macro_ci):.3f}**, with 95% CI ({f1_macro_ci[0]:.3f}, {f1_macro_ci[1]:.3f})  
             """
 
-            st.write(metrics)
-            
-            
-            
-            
-            
+            st.write(metrics) 
         else:
             st.header("Previously predicted")
         display_interactive_grid(TAB_PREDICT, predict_df, predict_columns)
-        display_annotation_feature(TAB_PREDICT, predict_df)
+        display_annotation_feature(TAB_PREDICT, connection, predict_df)
     
     learn_section_name = "Learn"
     learn_df = project_df[int_column(project_df[LEARN_COL]) > 0]    
@@ -409,7 +284,7 @@ with predict:
         # Sort by annotation importance to active learning
         learn_df = learn_df.sort_values(LEARN_COL, axis=0, ignore_index=True, key=lambda col: int_column(col))
         display_interactive_grid(learn_section_name, learn_df, annot_columns)
-        display_annotation_feature(learn_section_name, learn_df)
+        display_annotation_feature(learn_section_name, connection, learn_df)
         
 components.html(
     f"""

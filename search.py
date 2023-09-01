@@ -5,7 +5,7 @@ import numpy as np
 import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from gsheets import get_gsheets_urls, get_gsheets_columns, get_delimiter, connect_gsheets_api, batch_store_sheet
+from gsheets import connect_gsheets_api, batch_store_sheet, get_gsheets_urls, get_gsheets_columns, get_delimiter
 
 Entrez.email = "stell.aeva@hotmail.com"
 ENTREZ_API_CALLS_PS = 3
@@ -211,6 +211,8 @@ def retrieve_projects(ids):
         print("No project ids given.")
     
     return all_project_data, all_pub_data
+    
+    
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms, existing_projects):
