@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import hashlib
 import xml.etree.ElementTree as ET
 from Bio import Entrez
 from collections import defaultdict
@@ -42,7 +43,7 @@ UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
-metric_columns = ["Date", "Training_Size", "F1_micro", "F1_macro"]
+metric_columns = ["Date", "Dataset_Hash", "Train_Size", "Test_Size", "F1_micro", "F1_macro"]
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 search_columns = [ACC_COL, TITLE_COL]
@@ -669,7 +670,9 @@ with predict:
     if start_button:
         X_labelled, X_unlabelled, y_labelled, labels = check_dataset(project_df)
         if X_labelled:
-            training_size = len(X_labelled)
+            train_size = len(X_labelled)
+            test_size = len(X_unlabelled)
+            dataset_hash = hashlib.shake_256(pd.util.hash_pandas_object(project_df[[ACC_COL, ANNOT_COL]].sort_values(ACC_COL, axis=0), index=False).values).hexdigest(8)
             
             y_predicted, y_scores, f1_micro_ci, f1_macro_ci = get_predictions(X_labelled, X_unlabelled, y_labelled)
 
@@ -680,7 +683,7 @@ with predict:
             df = project_df.drop([PREDICT_COL, LEARN_COL], axis=1)
             process_predictions(y_predicted, y_scores, labels, df)
             
-            metric_row = np.array([date.today().strftime("%d/%m/%Y"), training_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci)])
+            metric_row = np.array([date.today().strftime("%d/%m/%Y"), dataset_hash, train_size, test_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci)])
             if metric_df.empty or not (metric_df == metric_row).all(1).any():
                 insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
                 metric_df.loc[len(metric_df)] = metric_row
