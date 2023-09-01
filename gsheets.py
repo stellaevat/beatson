@@ -12,6 +12,8 @@ project_columns = ["UID", ACC_COL, "Title", "Name", "Description", "Data_Type", 
 pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 metric_columns = ["Date", "Dataset_Hash", "Train_Size", "Test_Size", "F1_micro", "F1_macro"]
 
+DELIMITER = ", "
+
 loading_msg = "Loading project data..."
        
 def get_gsheets_urls():
@@ -19,6 +21,9 @@ def get_gsheets_urls():
     
 def get_gsheets_columns():
     return project_columns, pub_columns, metric_columns
+    
+def get_delimiter():
+    return DELIMITER
     
 @st.cache_data(show_spinner=False)        
 def get_gsheets_urls():
@@ -72,7 +77,7 @@ def clear_sheet_column(connection, column, sheet=GSHEETS_URL_PROJ):
             """
     connection.execute(clear)
     
-def batch_store_sheet(connection, entries, sheet=GSHEETS_URL_PROJ):
+def batch_store_sheet(connections, entries, sheet=GSHEETS_URL_PROJ):
     columns = list(entries[0].keys())
     values = []
     for entry in entries:

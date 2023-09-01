@@ -1,31 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 import hashlib
-import xml.etree.ElementTree as ET
-from Bio import Entrez
-from collections import defaultdict
 from datetime import date
 import streamlit.components.v1 as components
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-from gsheets import get_gsheets_urls, get_gsheets_columns, connect_gsheets_api, load_sheet, update_sheet, insert_sheet, clear_sheet_column
-from dataset_population import retrieve_projects
+from gsheets import get_gsheets_urls, get_gsheets_columns, get_delimiter, connect_gsheets_api, load_sheet, update_sheet, insert_sheet, clear_sheet_column
+from search import api_search, local_search, display_search_feature
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
+DELIMITER = get_delimiter()
 
-Entrez.email = "stell.aeva@hotmail.com"
-PROJECT_DB = "bioproject"
-BASE_URL_PROJ = "https://www.ncbi.nlm.nih.gov/" + PROJECT_DB + "/"
-BASE_URL_PUB = "https://pubmed.ncbi.nlm.nih.gov/"
-
-DELIMITER = ", "
 PLACEHOLDER = "-"
-IDTYPE = "acc"
-RETMAX = 10
 RESULTS_PER_PAGE = 10
 PROJECT_THRESHOLD = 10
 ANNOT_SUGGESTIONS = 10
@@ -45,8 +34,6 @@ predict_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 detail_columns = [ACC_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL]
 text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
-
-search_msg = "Getting search results..."
 
 reload_btn = "↻"
 export_btn = "Export to CSV"
@@ -75,56 +62,7 @@ css = f"""
 """
 st.markdown(css, unsafe_allow_html=True)
     
-@st.cache_data(show_spinner=False)
-def esearch(database, terms):
-    if not terms:
-        return None
-    handle = Entrez.esearch(db=database, term=terms, retmax=RETMAX, idtype=IDTYPE)
-    data_dict = Entrez.read(handle)
-    ids = data_dict["IdList"]
-    return ids
- 
-@st.cache_resource(show_spinner=search_msg)
-def api_search(search_terms):
-    ids = esearch(PROJECT_DB, search_terms)
-    ids_to_fetch = [project_id for project_id in ids if project_id not in project_df[[UID_COL, ACC_COL]].values] # either uid or acc because esearch unreliable
 
-    search_df, search_pub_df = None, None
-    all_project_data, all_pub_data = retrieve_projects(ids_to_fetch)
-    if all_project_data:
-        search_df = pd.DataFrame(all_project_data)
-        search_df.columns = project_columns
-        if all_pub_data:
-            search_pub_df = pd.DataFrame(all_pub_data)
-            search_pub_df.columns = pub_columns
-    
-    found = True if ids else False    
-    return search_df, search_pub_df, found
-            
-            
-@st.cache_resource(show_spinner=search_msg)
-def local_search(search_terms, df):
-    search_terms = {term.strip().lower() for term in search_terms.split() if term.strip()}
-    search_expr = "".join([f"(?=.*{term})" for term in search_terms])
-    
-    raw_counts = np.column_stack([df.astype(str)[col].str.count(search_expr, flags=re.IGNORECASE) for col in text_columns])
-    total_counts = np.sum(raw_counts, axis=1)
-    mask = np.where(total_counts > 0, True, False)
-    search_df = df.loc[mask]
-    
-    search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
-    return search_df
-    
-def display_search_feature(tab):
-    search_terms = st.text_input("Search", label_visibility="collapsed", placeholder="Search", autocomplete="on", key=(tab + "_search")).strip()
-    st.write("")
-    
-    if st.session_state.get(tab + "_prev_search", "") != search_terms:
-        st.session_state[tab + "_selected_row_index"] = 0
-        st.session_state[tab + "_selected_projects"] = []
-    st.session_state[tab + "_prev_search"] = search_terms
-    
-    return search_terms
 
 def id_to_url(base_url, page_id):
     return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
@@ -578,7 +516,7 @@ with annotate:
         find_terms = display_search_feature(TAB_ANNOTATE)
         
         if find_terms:   
-            find_df = local_search(find_terms, project_df)
+            find_df = local_search(find_terms, project_df, text_columns)
             if find_df is not None and not find_df.empty:
                 st.write(f"Results for '{find_terms}':")
                 annotate_df = find_df
@@ -598,7 +536,7 @@ with search:
     
     api_terms = display_search_feature(TAB_SEARCH)
     if api_terms:
-        api_df, api_pub_df, found = api_search(api_terms)
+        api_df, api_pub_df, found = api_search(api_terms, project_df[[UID_COL, ACC_COL]].values)
         if api_df is not None and not api_df.empty:
             st.write(f"Results for '{api_terms}':")
             display_interactive_grid(TAB_SEARCH, api_df, search_columns)
