@@ -8,16 +8,14 @@ from Bio import Entrez
 from collections import defaultdict
 from datetime import date
 import streamlit.components.v1 as components
-from shillelagh.backends.apsw.db import connect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from gsheets import get_gsheets_urls, get_gsheets_columns, connect_gsheets_api, load_sheet, update_sheet, insert_sheet, clear_sheet_column
 from dataset_population import retrieve_projects
 from active_learning import get_predictions
 
 st.set_page_config(page_title="BioProject Annotation")
 
-GSHEET_URL_PROJ = st.secrets["private_gsheets_url_proj"]
-GSHEET_URL_PUB = st.secrets["private_gsheets_url_pub"]
-GSHEET_URL_METRICS = st.secrets["private_gsheets_url_metrics"]
+GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
 
 Entrez.email = "stell.aeva@hotmail.com"
 PROJECT_DB = "bioproject"
@@ -37,13 +35,9 @@ CONFIDENCE_THRESHOLD = 0.75
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
 
-project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Score", "To_Annotate"]
+project_columns, pub_columns, metric_columns = get_gsheets_columns()
 UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL, SCORE_COL, LEARN_COL  = project_columns
-
-pub_columns = ["PMID", "Title", "Abstract", "MeSH", "Keywords"]
 PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
-
-metric_columns = ["Date", "Dataset_Hash", "Train_Size", "Test_Size", "F1_micro", "F1_macro"]
 
 annot_columns = [ACC_COL, TITLE_COL, ANNOT_COL, PREDICT_COL]
 search_columns = [ACC_COL, TITLE_COL]
@@ -53,7 +47,6 @@ text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 export_columns = [UID_COL, ACC_COL, TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL, PUB_COL, ANNOT_COL, PREDICT_COL]
 
 search_msg = "Getting search results..."
-loading_msg = "Loading project data..."
 
 reload_btn = "↻"
 export_btn = "Export to CSV"
@@ -81,29 +74,6 @@ css = f"""
     </style>
 """
 st.markdown(css, unsafe_allow_html=True)
-    
-@st.cache_resource(show_spinner=loading_msg)
-def connect_gsheets_api(service_no):
-    connection = connect(
-        ":memory:",
-        adapter_kwargs = {
-            "gsheetsapi": { 
-                "service_account_info":  dict(st.secrets[f"gcp_service_account_{service_no}"])
-            }
-        }
-    )
-    return connection
-    
-@st.cache_resource(show_spinner=loading_msg)
-def load_sheet(gsheet_url, columns):
-    query = f'SELECT * FROM "{gsheet_url}"'
-    executed_query = connection.execute(query)
-    df = pd.DataFrame(executed_query.fetchall())
-    if not df.empty:
-        df.columns = columns
-    else:
-        df = pd.DataFrame(columns=columns)
-    return df
     
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
@@ -353,44 +323,21 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
     st.write("")
 
 
-def update_sheet(project_id, column_values_dict, sheet=GSHEET_URL_PROJ):
-    column_values = [f'{col} = "{val}"' if val else f'{col} = NULL' for (col, val) in column_values_dict.items()]
-    update = f"""
-        UPDATE "{sheet}"
-        SET {", ".join(column_values)}
-        WHERE {ACC_COL} = "{project_id}"
-    """
-    connection.execute(update)
 
-def insert_sheet(values, columns=project_columns, sheet=GSHEET_URL_PROJ):
-    values_str = '("' + '", "'.join([str(val) for val in values]) + '")'
-    insert = f"""
-        INSERT INTO "{sheet}" ({", ".join(columns)})
-        VALUES {values_str}
-    """
-    connection.execute(insert)
-   
-def clear_sheet_column(column, sheet=GSHEET_URL_PROJ):
-    clear = f"""
-            UPDATE "{sheet}"
-            SET {column} = NULL
-            WHERE {column} IS NOT NULL
-            """
-    connection.execute(clear)
 
  
 def add_to_dataset(tab, df, new_pub_df):
     for i, project in pd.DataFrame(df).iterrows():
         if project[ACC_COL] not in project_df[ACC_COL].unique():
             project_df.loc[len(project_df.index)] = project.tolist()
-            insert_sheet(project.fillna(value='').tolist())
+            insert_sheet(connection, project.fillna(value='').tolist())
             
             publications = project[PUB_COL]
             if publications and new_pub_df is not None:
                 for pmid in publications.split(DELIMITER):
                     if pmid in new_pub_df[PMID_COL].unique() and pmid not in pub_df[PMID_COL].unique():
                         pub_values = new_pub_df.loc[new_pub_df[PMID_COL] == pmid].squeeze()
-                        insert_sheet(pub_values.tolist(), pub_columns, GSHEET_URL_PUB)
+                        insert_sheet(connection, pub_values.tolist(), pub_columns, GSHEETS_URL_PUB)
                         pub_df.loc[len(pub_df)] = pub_values
                         
             # Display update
@@ -444,7 +391,7 @@ def update_labels(tab, df, new_pub_df=None):
     if project_id in project_df[ACC_COL].unique():
         original_labels = get_project_labels(project_id)
         if updated_labels ^ set(original_labels):
-            update_sheet(project_id, {ANNOT_COL : updated_labels_str})
+            update_sheet(connection, project_id, {ANNOT_COL : updated_labels_str})
             
             if updated_labels_str:
                 project_df.loc[project_df[ACC_COL] == project_id, ANNOT_COL] = updated_labels_str
@@ -578,7 +525,7 @@ def process_predictions(y_predicted, y_scores, labels, df):
         old_score = old_score if old_score else ""
         
         if predicted_str != old_prediction or score != old_score:
-            update_sheet(project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
+            update_sheet(connection, project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
             project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
             project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
         
@@ -594,14 +541,14 @@ def process_predictions(y_predicted, y_scores, labels, df):
         if updates:
             if len(updates) < len(new_learn_df) + 1:
                 for (project_id, order) in updates.items():
-                    update_sheet(project_id, {LEARN_COL : order})
+                    update_sheet(connection, project_id, {LEARN_COL : order})
                     project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
             else:
-                clear_sheet_column(LEARN_COL)
+                clear_sheet_column(connection, LEARN_COL)
                 project_df[LEARN_COL] = None
                 for (project_id, order) in updates.items():
                     if order is not None:
-                        update_sheet(project_id, {LEARN_COL : order})
+                        update_sheet(connection, project_id, {LEARN_COL : order})
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
     
     
@@ -609,7 +556,7 @@ def process_predictions(y_predicted, y_scores, labels, df):
     labelled_df = project_df[project_df[ANNOT_COL].notnull()]
     for i, project_id in enumerate(labelled_df[ACC_COL]):
         if project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL].item():
-            update_sheet(project_id, {PREDICT_COL : None, SCORE_COL : None})
+            update_sheet(connection, project_id, {PREDICT_COL : None, SCORE_COL : None})
             project_df.loc[project_df[ACC_COL] == project_id, [PREDICT_COL, SCORE_COL]] = None
             
     
@@ -618,9 +565,9 @@ st.title("BioProject Annotation")
 annotate, search, predict = st.tabs(tab_names)
 
 connection = connect_gsheets_api(0)
-project_df = load_sheet(GSHEET_URL_PROJ, project_columns)
-pub_df = load_sheet(GSHEET_URL_PUB, pub_columns)
-metric_df = load_sheet(GSHEET_URL_METRICS, metric_columns)
+project_df = load_sheet(connection, project_columns, GSHEETS_URL_PROJ)
+pub_df = load_sheet(connection, pub_columns, GSHEETS_URL_PUB)
+metric_df = load_sheet(connection, metric_columns, GSHEETS_URL_METRICS)
 
 with annotate:
     st.header("Annotate projects")
@@ -685,7 +632,7 @@ with predict:
             
             metric_row = np.array([date.today().strftime("%d/%m/%Y"), dataset_hash, train_size, test_size, np.mean(f1_micro_ci), np.mean(f1_macro_ci)])
             if metric_df.empty or not (metric_df == metric_row).all(1).any():
-                insert_sheet(metric_row, metric_columns, GSHEET_URL_METRICS)
+                insert_sheet(connection, metric_row, metric_columns, GSHEETS_URL_METRICS)
                 metric_df.loc[len(metric_df)] = metric_row
 
             st.session_state.new_predictions = True

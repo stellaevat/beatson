@@ -4,10 +4,9 @@ import time
 import re
 from Bio import Entrez
 from collections import defaultdict
-from shillelagh.backends.apsw.db import connect
+from gsheets import get_gsheets_urls, get_gsheets_columns, connect_gsheets_api, batch_store_sheet
 
-GSHEET_URL_PROJ = st.secrets["private_gsheets_url_proj"]
-GSHEET_URL_PUB = st.secrets["private_gsheets_url_pub"]
+GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
 
 Entrez.email = "stell.aeva@hotmail.com"
 PROJECT_DB = "bioproject"
@@ -17,46 +16,11 @@ DELIMITER = ", "
 RETTYPE = "xml"
 RETMODE = "xml"
 ENTREZ_API_CALLS_PS = 3
-GOOGLE_API_CALLS_PM = 60
 
-project_columns = ["UID", "Accession", "Title", "Name", "Description", "Data_Type", "Scope", "Organism", "PMIDs", "Annotation", "Predicted", "Probability", "To_Annotate"]
+project_columns, pub_columns, metric_columns = get_gsheets_columns()
 
 style_tags = ["b", "i", "p"]
-
-@st.cache_resource(show_spinner=False)
-def connect_gsheets_api(service_no):
-    connection = connect(
-        ":memory:",
-        adapter_kwargs = {
-            "gsheetsapi": { 
-                "service_account_info":  dict(st.secrets[f"gcp_service_account_{service_no}"])
-            }
-        }
-    )
-    return connection
-
-def store_data(gsheet_url, entries):
-    columns = list(entries[0].keys())
-    values = []
-    for entry in entries:
-        entry_str = '("' + '", "'.join([entry[col] for col in columns]) + '")'
-        values.append(entry_str)
-        
-    for batch in range(0, len(values), GOOGLE_API_CALLS_PM):
-        values_str = ",\n".join(values[batch : min(batch + GOOGLE_API_CALLS_PM, len(values))])
-        insert = f''' 
-                INSERT INTO "{gsheet_url}" ({", ".join(columns)})
-                VALUES {values_str}
-                '''
-        
-        connection_used = st.session_state.get("connection_used", 0)
-        connections[connection_used].execute(insert)
-        st.session_state.connection_used = (connection_used + 1) % len(connections)
-        print(f"{min(batch + GOOGLE_API_CALLS_PM, len(values))}/{len(values)} entries stored...")
-        
-        # Won't be necessary once multiple users are used
-        time.sleep(60)
-        
+    
  
 def parse_xml(element):
     is_text = (element.text and not element.text.isspace())
@@ -241,6 +205,6 @@ if __name__ == '__main__':
         ids = f.readlines()
     all_project_data, all_pub_data = retrieve_projects(ids)
     if all_project_data:
-        store_data(GSHEET_URL_PROJ, all_project_data)
+        batch_store_sheet(connection, all_project_data, GSHEETS_URL_PROJ)
     if all_pub_data:
-        store_data(GSHEET_URL_PUB, all_pub_data)
+        batch_store_sheet(connection, all_pub_data, GSHEETS_URL_PUB)
