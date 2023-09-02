@@ -63,6 +63,7 @@ def toggle_help():
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
 st.write("Annotate and predict annotations for NCBI BioProjects, with fields that serve your specific research goals.")
+annotate, search, predict = st.tabs(tab_names)
 
 connection = connect_gsheets_api(0)
 project_df = load_sheet(connection, project_columns, GSHEETS_URL_PROJ)
@@ -71,8 +72,6 @@ metric_df = load_sheet(connection, metric_columns, GSHEETS_URL_METRICS)
 
 st.session_state.project_df = project_df
 st.session_state.pub_df = pub_df
-
-annotate, search, predict = st.tabs(tab_names)
 
 with annotate:
     annot_help = st.button(help_btn, key=(TAB_ANNOTATE + "_help"), on_click=toggle_help)
