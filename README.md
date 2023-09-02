@@ -44,7 +44,7 @@ Prediction Metrics: Date, Dataset_Hash, Train_Size, Test_Size, F1_micro, F1_macr
 - **Enable Google Sheets API:** Go to the [API Library](https://console.cloud.google.com/apis/library), find the [Google Sheets API Service](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and with the new project selected to work on, enable the service.
 - **Create a service account and key:** Go to [Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts), select the project to work on, and create a service account, granting Editor permissions. Under **Actions** select **Manage keys**, create a new key in JSON format and download it into a secure directory on your computer.
 - **Share the Google sheets with the service account:** Copy the email address of the service account created and give it Editor permissions on the three Google sheets created earlier.
-- **Create Streamlit secrets:** Create a **secrets.toml** file in the hidden **.streamlit** directory found in the root directory of the app and paste the contents of the JSON service account key downloaded earlier. The contents should be converted to the format shown below, with the addition of the Google Sheet URLs at the top.
+- **Create Streamlit secrets:** Create a **secrets.toml** file in the hidden **.streamlit** directory found in the root directory of the app and paste the contents of the JSON service account key downloaded earlier. The contents should be converted to the template format shown below, with the addition of the Google Sheet URLs at the top.
 
 ```
 private_gsheets_url_proj = "<PROJECT_DATA_SHAREABLE_LINK_WITH_EDIT_ACCESS>"
@@ -65,4 +65,4 @@ client_x509_cert_url = "<KEY_DATA>"
 universe_domain = "googleapis.com"
 ```
 - **Deploy app:** Log in and deploy the app on [Streamlit.io](https://share.streamlit.io/), using the link to the current repository, the **main** branch and **main.py** as the main file. Under Advanced Settings, set the Python version to **3.11.3** and paste the contents of **.streamlit/secrets.toml** under Secrets.
-- **Working on the app:** Clone the current dipository, navigate to the root directory and run **pip install -r requirements.txt** to install all dependencies in a dedicated virtual environment. Run **streamlit run main.py** to run the app locally and observe the effects of your changes. Changes need to be pushed to the remote repository to be reflected in the deployed app.
+- **Working on the app:** Clone the current dipository, navigate to the root directory and run **pip install -r requirements.txt** to install all dependencies in a dedicated virtual environment. To populate the Google sheets with the random project IDs listed in **project_ids.txt**, run **python populate.py**. Run **streamlit run main.py** to run the app locally and observe the effects of your changes. Changes need to be pushed to the remote repository to be reflected in the deployed app.
