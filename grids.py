@@ -18,7 +18,7 @@ RESULTS_PER_PAGE = 10
 
 reload_btn = "↻"
 export_btn = "Export to CSV"
-show_btn = "Show details"
+show_btn = "View details"
 hide_btn = "Hide details"
 next_btn = "Next"
 prev_btn = "Previous"

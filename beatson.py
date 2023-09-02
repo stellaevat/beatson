@@ -26,6 +26,7 @@ text_columns = [TITLE_COL, NAME_COL, DESCR_COL, TYPE_COL, SCOPE_COL, ORG_COL]
 
 tab_names = ["Annotate", "Search", "Predict"]
 TAB_ANNOTATE, TAB_SEARCH, TAB_PREDICT = tab_names
+help_btn = "Help"
 
 CONFIDENCE_THRESHOLD = 0.75
 
@@ -52,10 +53,16 @@ def int_column(col):
 def float_column(col):
     return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
     
+def toggle_help():
+    hidden = st.session_state.get("help_hidden", True)
+    if hidden:
+        st.session_state["help_hidden"] = False
+    else:
+        st.session_state["help_hidden"] = True
     
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
-annotate, search, predict = st.tabs(tab_names)
+st.write("Annotate and predict annotations for NCBI BioProjects, with fields that serve your specific research goals.")
 
 connection = connect_gsheets_api(0)
 project_df = load_sheet(connection, project_columns, GSHEETS_URL_PROJ)
@@ -65,10 +72,19 @@ metric_df = load_sheet(connection, metric_columns, GSHEETS_URL_METRICS)
 st.session_state.project_df = project_df
 st.session_state.pub_df = pub_df
 
-with annotate:
-    st.header("Annotate projects")
-    annotate_df = project_df
+annotate, search, predict = st.tabs(tab_names)
 
+with annotate:
+    annot_help = st.button(help_btn, key=(TAB_ANNOTATE + "_help"), on_click=toggle_help)
+    if not st.session_state.get("help_hidden", True):
+        st.info("""**Help (Annotate):**   
+        •  Explore a subset of the BioProject database, to annotate it with your fields of interest.   
+        •  Search, filter and view project details to discover relevant projects.   
+        •  Create labels to annotate with, or choose from the drop-down list of the ones you have already used.""")
+        
+    st.header("Annotate projects")
+    
+    annotate_df = project_df
     if not project_df.empty:
         find_terms = display_search_feature(TAB_ANNOTATE)
         
@@ -89,6 +105,13 @@ with annotate:
     
 
 with search:
+    annot_help = st.button(help_btn, key=(TAB_SEARCH + "_help"), on_click=toggle_help)
+    if not st.session_state.get("help_hidden", True):
+        st.info("""**Help (Search):**   
+        •  Search for more projects from the full BioProject database, to supplement the local dataset and strengthen your annotations.   
+        •  Add the search results to the dataset so you can start annotating them in the **Annotate** tab.   
+        •  If you don't wish to add everything, click on the specific projects you want to select.""")
+        
     st.header("Search BioProject")
     
     api_terms = display_search_feature(TAB_SEARCH)
@@ -104,6 +127,13 @@ with search:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
   
 with predict:
+    annot_help = st.button(help_btn, key=(TAB_PREDICT + "_help"), on_click=toggle_help)
+    if not st.session_state.get("help_hidden", True):
+        st.info(f"""**Help (Predict):**   
+        •  Run the prediction algorithm to get predictions for all unannotated projects (based on your existing annotations), each assigned a score for the confidence in that prediction.    
+        •  You can confirm or correct predictions by annotating manually.   
+        •  To best improve the future performance of the algorithm, annotate the projects suggested below.""")
+        
     st.header("Predict annotations")
     
     message = st.empty()
