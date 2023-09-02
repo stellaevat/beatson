@@ -1,7 +1,7 @@
 # Beatson BioProject Annotation Web-Application
 
 ## Aim
-The **Beatson BioProject Annotation Web-Application** aims to help researchers at the Beatson Institute for Cancer Research to find entries from the NCBI BioProject database that are relevant to their research, despite their inconsistent and/or incomplete metadata fields. It can be used to annotate and predict annotations BioProjects, with fields that serve the researchers' specific research goals.
+The **Beatson BioProject Annotation Web-Application** aims to help researchers at the Beatson Institute for Cancer Research to find entries from the NCBI BioProject database that are relevant to their research, despite their inconsistent and/or incomplete metadata fields. It can be used to annotate and predict annotations for BioProjects, with fields that serve the researchers' specific research goals.
 
 ## Features
 ### Annotate
@@ -17,11 +17,11 @@ The **Search** tab allows to search for more projects, directly from the full Bi
 
 • The search results can be added to the dataset, so they can be annotated in the **Annotate** tab.
 
-• All search results at once or a smaller selection can be added to the dataset.
+• All search results at once, or a smaller selection, can be added to the dataset.
 ![search](https://github.com/stellaevat/beatson/assets/97710362/8aad2675-67a0-4962-a5db-a9f660d6e88b)
 
 ### Predict
-The **Predict** tab allows to run a prediction algorithm to get predictions for all unannotated projects, based on the existing annotations
+The **Predict** tab allows to run a prediction algorithm to get predictions for all unannotated projects, based on the existing annotations.
 
 • Each prediction comes with a score for the algorithm's confidence in it.
 
@@ -42,9 +42,9 @@ Prediction Metrics: Date, Dataset_Hash, Train_Size, Test_Size, F1_micro, F1_macr
 
 - **Create a Google Cloud project:** Log in to [Google Cloud](https://cloud.google.com), go to the [Console](https://console.cloud.google.com/welcome) and create a new project.
 - **Enable Google Sheets API:** Go to the [API Library](https://console.cloud.google.com/apis/library), find the [Google Sheets API Service](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and with the new project selected to work on, enable the service.
-- **Create a service account and key:** Go to [Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts), select the project to work on, and create a service account, granting Editor permissions. Under **Actions** select **Manage keys**, create a new key in JSON format and download it into a secure directory on your computer.
-- **Share the Google sheets with the service account:** Copy the email address of the service account created and give it Editor permissions on the three Google sheets created earlier.
-- **Create Streamlit secrets:** Create a **secrets.toml** file in the hidden **.streamlit** directory found in the root directory of the app and paste the contents of the JSON service account key downloaded earlier. The contents should be converted to the template format shown below, with the addition of the Google Sheet URLs at the top.
+- **Create a service account and key:** Go to [Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts), select the project to work on, and create a service account, granting *Editor* permissions. Under *Actions* select *Manage keys*, create a new key in JSON format and save it in a secure location on your device.
+- **Share the google sheets with the service account:** Copy the email address of the service account created and give it *Editor* permissions on the three Google sheets created earlier.
+- **Create streamlit secrets:** Create a **secrets.toml** file in the hidden **.streamlit** directory found in the root directory of the app and paste the contents of the JSON service account key downloaded earlier. The contents should be converted to the template format shown below, with the addition of the google sheet URLs at the top.
 
 ```
 private_gsheets_url_proj = "<PROJECT_DATA_SHAREABLE_LINK_WITH_EDIT_ACCESS>"
@@ -64,6 +64,6 @@ auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
 client_x509_cert_url = "<KEY_DATA>"
 universe_domain = "googleapis.com"
 ```
-- **Deploy app:** Log in and deploy the app on [Streamlit.io](https://share.streamlit.io/), using the link to the current repository, the **main** branch and **main.py** as the main file. Under Advanced Settings, set the Python version to **3.11.3** and paste the contents of **.streamlit/secrets.toml** under Secrets.
-- **Set up local repo:** Clone the current repository, navigate to the root directory and run **pip install -r requirements.txt** to install all dependencies in a dedicated virtual environment. To populate the Google sheets with the random project IDs listed in **project_ids.txt**, run **python populate.py**. Update the Entrez.email in line 10 of **features/search.py** with your own.
+- **Deploy app:** Log in and deploy the app on [Streamlit.io](https://share.streamlit.io/), using the link to the current repository, the **main** branch and **main.py** as the main file. In the *Advanced Settings*, set the Python version to **3.11.3** and paste the contents of **.streamlit/secrets.toml** under *Secrets*.
+- **Set up local repo:** Clone the current repository, navigate to the root directory and run **pip install -r requirements.txt** to install all dependencies in a dedicated virtual environment. To populate the Google sheets with the random project IDs listed in **project_ids.txt**, run **python populate.py**. Update the *Entrez.email* in line 10 of **features/search.py** with your own.
 - **Track changes:** Run **streamlit run main.py** to run the app locally and observe the effects of your changes. Changes need to be pushed to the remote repository to be reflected in the deployed app.
