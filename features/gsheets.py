@@ -30,12 +30,12 @@ def get_gsheets_urls():
     return GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS
 
 @st.cache_resource(show_spinner=loading_msg)
-def connect_gsheets_api(service_no):
+def connect_gsheets_api():
     connection = connect(
         ":memory:",
         adapter_kwargs = {
             "gsheetsapi": { 
-                "service_account_info":  dict(st.secrets[f"gcp_service_account_{service_no}"])
+                "service_account_info":  dict(st.secrets["gcp_service_account"])
             }
         }
     )
@@ -77,7 +77,7 @@ def clear_sheet_column(connection, column, sheet=GSHEETS_URL_PROJ):
             """
     connection.execute(clear)
     
-def batch_store_sheet(connections, entries, sheet=GSHEETS_URL_PROJ):
+def batch_store_sheet(connection, entries, sheet=GSHEETS_URL_PROJ):
     columns = list(entries[0].keys())
     values = []
     for entry in entries:
@@ -90,12 +90,7 @@ def batch_store_sheet(connections, entries, sheet=GSHEETS_URL_PROJ):
                 INSERT INTO "{sheet}" ({", ".join(columns)})
                 VALUES {values_str}
                 '''
-        
-        # Rotate through available connections
-        connection_used = st.session_state.get("connection_used", 0)
-        connections[connection_used].execute(insert)
-        st.session_state.connection_used = (connection_used + 1) % len(connections)
+
+        connection.execute(insert)
         print(f"{min(batch + GSHEET_API_CALLS_PM, len(values))}/{len(values)} entries stored...")
-        
-        # May not be necessary once multiple users are used
         time.sleep(60)
