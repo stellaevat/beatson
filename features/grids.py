@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-from gsheets import get_gsheets_columns
-from search import get_base_urls
+from features.gsheets import get_gsheets_columns
+from features.search import get_base_urls
 
 BASE_URL_PROJ, BASE_URL_PUB = get_base_urls()
 

@@ -1,6 +1,6 @@
 import streamlit as st
 import numpy as np
-from gsheets import update_sheet, clear_sheet_column, get_gsheets_urls, get_gsheets_columns, get_delimiter
+from features.gsheets import update_sheet, clear_sheet_column, get_gsheets_urls, get_gsheets_columns, get_delimiter
 
 project_columns, pub_columns, metric_columns = get_gsheets_columns()
 

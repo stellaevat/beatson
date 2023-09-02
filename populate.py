@@ -1,6 +1,6 @@
 import streamlit as st
-from gsheets import get_gsheets_urls, connect_gsheets_api, batch_store_sheet
-from search import retrieve_projects
+from features.gsheets import get_gsheets_urls, connect_gsheets_api, batch_store_sheet
+from features.search import retrieve_projects
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
 

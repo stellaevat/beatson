@@ -5,7 +5,7 @@ import numpy as np
 import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from gsheets import connect_gsheets_api, batch_store_sheet, get_gsheets_urls, get_gsheets_columns, get_delimiter
+from features.gsheets import connect_gsheets_api, batch_store_sheet, get_gsheets_urls, get_gsheets_columns, get_delimiter
 
 Entrez.email = "stell.aeva@hotmail.com"
 ENTREZ_API_CALLS_PS = 3

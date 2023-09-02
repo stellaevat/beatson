@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from gsheets import update_sheet, insert_sheet, get_gsheets_urls, get_gsheets_columns, get_delimiter
+from features.gsheets import update_sheet, insert_sheet, get_gsheets_urls, get_gsheets_columns, get_delimiter
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
 

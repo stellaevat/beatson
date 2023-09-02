@@ -4,12 +4,12 @@ import numpy as np
 import hashlib
 from datetime import date
 import streamlit.components.v1 as components
-from gsheets import connect_gsheets_api, load_sheet, insert_sheet, get_gsheets_urls, get_gsheets_columns
-from search import display_search_feature, api_search, local_search
-from grids import display_interactive_grid, get_grid_buttons, get_primary_colour
-from annotate import display_annotation_feature, display_add_to_dataset_feature
-from predict import process_dataset, process_predictions
-from active_learning import active_learning
+from features.gsheets import connect_gsheets_api, load_sheet, insert_sheet, get_gsheets_urls, get_gsheets_columns
+from features.search import display_search_feature, api_search, local_search
+from features.grids import display_interactive_grid, get_grid_buttons, get_primary_colour
+from features.annotate import display_annotation_feature, display_add_to_dataset_feature
+from features.predict import process_dataset, process_predictions
+from features.active_learning import active_learning
 
 st.set_page_config(page_title="BioProject Annotation")
 
