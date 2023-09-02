@@ -11,6 +11,7 @@ PMID_COL, PUBTITLE_COL, ABSTRACT_COL, MESH_COL, KEY_COL = pub_columns
 
 DELIMITER = get_delimiter()
 
+
 def add_to_dataset(tab, connection, add_df, add_pub_df):
     project_df = st.session_state.get("project_df", pd.DataFrame(columns=project_columns))
     pub_df = st.session_state.get("pub_df", pd.DataFrame(columns=pub_columns))
@@ -55,6 +56,7 @@ def display_add_to_dataset_feature(tab, connection, add_df, add_pub_df):
             st.form_submit_button("Add selection", on_click=add_to_dataset, args=(tab, connection, add_df[add_df[ACC_COL].isin(add_selection)], add_pub_df))
         with col2:
             st.form_submit_button("Add all results", on_click=add_to_dataset, args=(tab, connection, add_df, add_pub_df))
+
 
 def get_project_labels(project_id, column=ANNOT_COL):
     project_df = st.session_state.get("project_df", pd.DataFrame(columns=project_columns))

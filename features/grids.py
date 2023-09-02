@@ -32,26 +32,34 @@ aggrid_css = {
     ".ag-cell": {"padding": "0px 12px;"},
 }
 
+
 def get_grid_buttons():
     return reload_btn, export_btn, show_btn, hide_btn, next_btn, prev_btn
+    
     
 def get_primary_colour():
     return primary_colour
 
+
 def id_to_url(base_url, page_id):
     return f'<a target="_blank" href="{base_url + str(page_id) + "/"}">{page_id}</a>'
+ 
  
 def show_details(tab):
     st.session_state[tab + "_project_details_hidden"] = False
     
+    
 def hide_details(tab):
     st.session_state[tab + "_project_details_hidden"] = True
+    
     
 def go_to_next(tab, selected_row_index):
     st.session_state[tab + "_selected_row_index"] = selected_row_index + 1
     
+    
 def go_to_previous(tab, selected_row_index):
     st.session_state[tab + "_selected_row_index"] = selected_row_index - 1
+    
     
 def display_project_details(project):
     project = pd.Series({k : v.translate(markdown_translation) if v else v for (k, v) in project.to_dict().items()})
@@ -101,7 +109,6 @@ def display_navigation_buttons(tab, total_projects):
     with col2:
         if selected_row_index < total_projects - 1:
             st.button(next_btn, on_click=go_to_next, args=(tab, selected_row_index), key=(tab + "_next"))
-
 
 
 @st.cache_data(show_spinner=False)
@@ -169,8 +176,11 @@ def get_grid_options(df, columns, starting_page, selected_row_index, selection_m
     grid_options = builder.build()
     return grid_options
     
+    
 def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode="single"):
-    rerun = st.session_state.get(tab + "_rerun", 0)
+    # Indicates that a project was selected on the grid, trigerring an experimental rerun, with session state variables updated in order to display that selection
+    rerun = st.session_state.get(tab + "_rerun", False)
+    
     selected_row_index = st.session_state.get(tab + "_selected_row_index", 0)
     starting_page = selected_row_index // RESULTS_PER_PAGE
 
@@ -185,12 +195,14 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         reload_data=False,
         enable_enterprise_modules=False
     )
+    
+    # Get selection from grid
     selected_row = grid['selected_rows']
     selected_df = pd.DataFrame(selected_row)
     previous_page = st.session_state.get(tab + "_starting_page", 0)
     project_details_hidden = st.session_state.get(tab + "_project_details_hidden", True)
     
-    
+    # Export button
     col1, col2 = st.columns(2)
     with col1:
         st.download_button("Export to CSV", df[export_columns].rename(columns={ANNOT_COL:"Manual_Annotation", PREDICT_COL: "Predicted_Annotation"}).to_csv(index=False).encode('utf-8'), "BioProjct_Annotation.csv", "text/csv", key=(tab + "_export"))
@@ -200,7 +212,7 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         else:
             st.button(hide_btn, key=(tab + "_hide"), on_click=hide_details, args=(tab,))
         
-
+    # If this is a rerun, display new selection
     if rerun:
         if not project_details_hidden:
             display_project_details(df.iloc[selected_row_index])
@@ -208,8 +220,9 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
                 display_navigation_buttons(tab, len(df))
             
         st.session_state[tab + "_starting_page"] = starting_page
-        st.session_state[tab + "_rerun"] = 0
+        st.session_state[tab + "_rerun"] = False
 
+    # Else if a selection was just made, update the session state with the relevant details and rerun to display it
     elif not selected_df.empty:
         selected_mask = df[ACC_COL].isin(selected_df[ACC_COL])
         selected_data = df.loc[selected_mask]
@@ -222,11 +235,12 @@ def display_interactive_grid(tab, df, columns, nav_buttons=True, selection_mode=
         if selected_id not in selected_projects:
             st.session_state[tab + "_selected_projects"] = selected_projects + [selected_id]
             
-        st.session_state[tab + "_rerun"] = 1
+        st.session_state[tab + "_rerun"] = True
         
         # Rerun to have selection displayed
         st.experimental_rerun()   
-        
+    
+    # Else display the details of the latest project to be selected
     elif not project_details_hidden:
         display_project_details(df.iloc[selected_row_index])
         if nav_buttons:

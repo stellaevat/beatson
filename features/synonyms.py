@@ -5,6 +5,7 @@ loading_msg = "Loading project data..."
 
 wordlists = ["terms_cancers.tsv", "terms_conflicting.tsv", "terms_drugs.tsv", "terms_genes.tsv", "terms_proteins.tsv", "terms_variants.tsv"]
 
+
 @st.cache_data(show_spinner=False)
 def get_terms_and_synonyms(wordlist):
   terms = set()
@@ -14,6 +15,7 @@ def get_terms_and_synonyms(wordlist):
       terms.update(set(group.split("|")))
   return terms, synonyms
 
+
 @st.cache_data(show_spinner=False)
 def get_vocabulary_and_index(terms):
   vocabulary = {}
@@ -22,6 +24,7 @@ def get_vocabulary_and_index(terms):
       vocabulary[term] = i
       index[i] = term
   return vocabulary, index
+
 
 @st.cache_data(show_spinner=loading_msg)
 def get_synonym_graph(wordlists=wordlists):

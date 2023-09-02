@@ -13,6 +13,7 @@ LABEL_THRESHOLD = 3
 
 DELIMITER = get_delimiter()
 
+
 @st.cache_resource(show_spinner=False)
 def get_label_matrix(df):
     labels = set()
@@ -35,6 +36,7 @@ def get_label_matrix(df):
             
     return y_labelled, label_to_index, index_to_label
  
+ 
 @st.cache_resource(show_spinner=False) 
 def get_sample_matrix(df, pub_df, text_columns):
     X_labelled = []
@@ -47,6 +49,7 @@ def get_sample_matrix(df, pub_df, text_columns):
         X_labelled.append(text)
     return X_labelled
 
+
 @st.cache_data(show_spinner="Processing dataset...")
 def process_dataset(project_df, pub_df, text_columns): 
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
@@ -58,6 +61,7 @@ def process_dataset(project_df, pub_df, text_columns):
     labelled_projects = len(project_sum[project_sum > 0]) 
     rare_labels = (label_sums < LABEL_THRESHOLD).nonzero()[0]
 
+    # Check that dataset is ready for prediction algorithm
     if labelled_projects == len(project_df):
         error = "All projects in the dataset have been manually annotated. Use the **Search** tab to find and add unannotated projects."
     elif labelled_projects < PROJECT_THRESHOLD:
@@ -81,6 +85,7 @@ def process_predictions(y_predicted, y_scores, labels, df, _connection):
     to_annotate = np.argsort(y_scores)[:ANNOT_SUGGESTIONS].tolist() if len(y_scores) > ANNOT_SUGGESTIONS else np.argsort(y_scores).tolist()
     unlabelled_df = project_df[project_df[ANNOT_COL].isnull()]
     
+    # Store predictions and confidence scores
     for i, project_id in enumerate(unlabelled_df[ACC_COL]):
         predicted_mask = np.where(y_predicted[i] > 0, True, False)
         predicted_str = DELIMITER.join(sorted(labels[predicted_mask]))
@@ -95,7 +100,8 @@ def process_predictions(y_predicted, y_scores, labels, df, _connection):
             update_sheet(_connection, project_id, {PREDICT_COL : predicted_str, SCORE_COL : score})
             project_df.loc[project_df[ACC_COL] == project_id, PREDICT_COL] = predicted_str
             project_df.loc[project_df[ACC_COL] == project_id, SCORE_COL] = score
-        
+    
+    # Store active learning suggestions
     if to_annotate:
         old_learn_df = project_df[project_df[LEARN_COL].replace('', None).notnull()]
         new_learn_df = unlabelled_df.iloc[to_annotate, :].reset_index(drop=True)
@@ -120,7 +126,7 @@ def process_predictions(y_predicted, y_scores, labels, df, _connection):
                         project_df.loc[project_df[ACC_COL] == project_id, LEARN_COL] = order
     
     
-    # Clear predictions from earlier runs (labelled projects not updated above)
+    # Clear predictions from earlier runs (since labelled projects not updated above)
     labelled_df = project_df[project_df[ANNOT_COL].replace('', None).notnull()]
     for (i, project) in labelled_df.iterrows():
         if project[PREDICT_COL] or project[SCORE_COL]:

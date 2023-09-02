@@ -26,11 +26,14 @@ DELIMITER = get_delimiter()
 
 search_msg = "Getting search results..."
 
+
 def get_databases():
     return PROJECT_DB, PUB_DB
     
+    
 def get_base_urls():
     return BASE_URL_PROJ, BASE_URL_PUB
+
 
 def parse_xml(element):
     is_text = (element.text and not element.text.isspace())
@@ -68,6 +71,7 @@ def parse_xml(element):
     tag = element.tag
     return tag, data_dict
 
+
 @st.cache_data(show_spinner=False) 
 def clean_text(data_dict):
     for col, data in data_dict.items():
@@ -88,6 +92,7 @@ def clean_text(data_dict):
         data_dict[col] = data
     return data_dict
     
+    
 @st.cache_data(show_spinner=False) 
 def efetch(database, ids):
     if not ids:
@@ -97,6 +102,7 @@ def efetch(database, ids):
     tag, data_dict = parse_xml(tree.getroot())
     return data_dict 
 
+
 @st.cache_data(show_spinner=False)
 def esearch(database, terms):
     if not terms:
@@ -105,6 +111,7 @@ def esearch(database, terms):
     data_dict = Entrez.read(handle)
     ids = data_dict["IdList"]
     return ids
+    
     
 @st.cache_data(show_spinner=False)   
 def get_project_data(project):
@@ -144,6 +151,7 @@ def get_project_data(project):
     project_data = clean_text(project_data)
     return project_data
 
+
 @st.cache_data(show_spinner=False)    
 def get_publication_data(pub):
     pub_data = {}
@@ -182,6 +190,7 @@ def get_publication_data(pub):
     pub_data = clean_text(pub_data)
     return pub_data
     
+    
 @st.cache_data(show_spinner=False)
 def retrieve_projects(ids):
     all_project_data, all_pub_data = [], []
@@ -215,7 +224,6 @@ def retrieve_projects(ids):
     
     return all_project_data, all_pub_data
     
-    
  
 @st.cache_resource(show_spinner=search_msg)
 def api_search(search_terms, existing_projects):
@@ -232,7 +240,7 @@ def api_search(search_terms, existing_projects):
             search_pub_df.columns = pub_columns
     
     found = True if ids else False    
-    return search_df, search_pub_df, found
+    return search_df, search_pub_df, found  
             
             
 @st.cache_resource(show_spinner=search_msg)
@@ -247,6 +255,7 @@ def local_search(search_terms, df, text_columns):
     
     search_df = search_df.sort_index(axis=0, key=lambda col: col.map(lambda i: total_counts[i]), ascending=False, ignore_index=True)
     return search_df
+    
     
 def display_search_feature(tab):
     search_terms = st.text_input("Search", label_visibility="collapsed", placeholder="Search", autocomplete="", key=(tab + "_search")).strip()

@@ -3,6 +3,7 @@ from features.search import retrieve_projects
 
 GSHEETS_URL_PROJ, GSHEETS_URL_PUB, GSHEETS_URL_METRICS = get_gsheets_urls()
 
+
 if __name__ == '__main__':
     connection = connect_gsheets_api()
     ids = ""

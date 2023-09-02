@@ -49,9 +49,11 @@ st.markdown(css, unsafe_allow_html=True)
 def int_column(col):
     return pd.Series([int(val) if (val and val.isnumeric()) else 0 for val in col])
     
+    
 @st.cache_data(show_spinner=False) 
 def float_column(col):
     return pd.Series([float(val) if (val and val.isnumeric()) else 0 for val in col])
+    
     
 def toggle_help():
     hidden = st.session_state.get("help_hidden", True)
@@ -61,11 +63,13 @@ def toggle_help():
         st.session_state["help_hidden"] = True
     
     
+# Header    
 st.button(reload_btn, key="reload_btn") 
 st.title("BioProject Annotation")
 st.write("Annotate and predict annotations for NCBI BioProjects, with fields that serve your specific research goals.")
 annotate, search, predict = st.tabs(tab_names)
 
+# Load Google sheet data
 connection = connect_gsheets_api()
 project_df = load_sheet(connection, project_columns, GSHEETS_URL_PROJ)
 pub_df = load_sheet(connection, pub_columns, GSHEETS_URL_PUB)
@@ -74,6 +78,8 @@ metric_df = load_sheet(connection, metric_columns, GSHEETS_URL_METRICS)
 st.session_state.project_df = project_df
 st.session_state.pub_df = pub_df
 
+
+# Annotate tab
 with annotate:
     annot_help = st.button(help_btn, key=(TAB_ANNOTATE + "_help"), on_click=toggle_help)
     if not st.session_state.get("help_hidden", True):
@@ -104,6 +110,7 @@ with annotate:
         st.write("Annotation dataset unavailable. Use the Search tab to search the BioProject database directly.")
     
 
+# Search tab
 with search:
     annot_help = st.button(help_btn, key=(TAB_SEARCH + "_help"), on_click=toggle_help)
     if not st.session_state.get("help_hidden", True):
@@ -125,7 +132,9 @@ with search:
             st.write(f"No results for '{api_terms}' that are not already in the dataset. Try looking for something else.")
         else:
             st.write(f"No results for '{api_terms}'. Check for typos or try looking for something else.")
-  
+
+
+# Predict tab  
 with predict:
     annot_help = st.button(help_btn, key=(TAB_PREDICT + "_help"), on_click=toggle_help)
     if not st.session_state.get("help_hidden", True):
