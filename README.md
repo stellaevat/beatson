@@ -10,7 +10,7 @@ The **Annotate** tab allows users to explore a subset of the BioProject database
 • There are search and filter functionalities to help discover relevant projects and view details about them.
 
 • New labels can be created for annotation, or chosen from a drop-down list of the labels already used.
-![annotate](https://github.com/stellaevat/beatson/assets/97710362/c14e52e3-ad15-4b7b-a73a-6f8806c8f818)
+![annotate](https://github.com/stellaevat/beatson/assets/97710362/717c7b48-9ffb-407c-9064-6608556a4075)
 
 ### Search
 The **Search** tab allows to search for more projects, directly from the full BioProject database, to supplement the local dataset and strengthen annotations.
@@ -18,7 +18,7 @@ The **Search** tab allows to search for more projects, directly from the full Bi
 • The search results can be added to the dataset, so they can be annotated in the **Annotate** tab.
 
 • All search results at once, or a smaller selection, can be added to the dataset.
-![search](https://github.com/stellaevat/beatson/assets/97710362/8aad2675-67a0-4962-a5db-a9f660d6e88b)
+![search](https://github.com/stellaevat/beatson/assets/97710362/191b1fca-7331-460c-8d9a-e0b35b111313)
 
 ### Predict
 The **Predict** tab allows to run a prediction algorithm to get predictions for all unannotated projects, based on the existing annotations.
@@ -28,7 +28,7 @@ The **Predict** tab allows to run a prediction algorithm to get predictions for 
 • Predictions can be confirmed or corrected through manual annotation.
 
 • To best improve the future performance of the algorithm, users are given suggestions for the projects to annotate next, based on lowest confidence score.
-![predict](https://github.com/stellaevat/beatson/assets/97710362/5852e3ab-6edb-4101-a7c3-7db2ab845439)
+![predict](https://github.com/stellaevat/beatson/assets/97710362/75b8949a-1de2-42ee-bcaf-a8607a268037)
  
 ## Set-up
 
